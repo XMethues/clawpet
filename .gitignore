@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local runtime state
+*.pid
+*.log
+
+# Local backups
+*.bak
+*.bak-*
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+*~
