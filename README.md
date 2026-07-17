@@ -19,6 +19,17 @@ When Hermes loads the plugin, it ensures that:
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 
+## Frontend
+
+The complete Vite + React + TypeScript project is in [`frontend/`](frontend/). The generated production bundle is committed under `clawchat_pet/web/` so the plugin works immediately after installation.
+
+```bash
+cd frontend
+npm ci
+npm run dev      # development server with API proxy
+npm run build    # rebuilds ../clawchat_pet/web/
+```
+
 ## Tests
 
 ```bash
