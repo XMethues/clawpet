@@ -1,6 +1,6 @@
 # Policy and Chat Interaction Notes
 
-Use this reference when interpreting owner language about 银月’s daily cultivation direction.
+Use this reference when interpreting owner language about the current pet's daily cultivation direction.
 
 ## Layering Rule
 

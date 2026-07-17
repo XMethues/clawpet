@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import atexit
-import json
 import sys
-import urllib.request
 from pathlib import Path
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
@@ -18,7 +16,7 @@ _SKILL_REGISTERED = False
 
 def _skill_description(skill_path: Path) -> str:
     """Read the frontmatter description from a plugin SKILL.md."""
-    fallback = "银月道场 cultivation pet gameplay and liveware presence."
+    fallback = "Petdex cultivation pet gameplay and liveware presence."
     try:
         text = skill_path.read_text(encoding="utf-8")
     except Exception:
@@ -58,43 +56,22 @@ def _register_skill(ctx) -> None:
     _SKILL_REGISTERED = True
 
 
-def _server_already_running() -> bool:
-    """Return True when the configured local clawchat-pet API is healthy.
-
-    The plugin autostarts its embedded server by default, but a standalone
-    server may already be serving the configured HOST/PORT. Reuse it instead of
-    raising an address-in-use error during Hermes plugin registration.
-    """
-    try:
-        from clawchat_pet import server as _server
-
-        url = f"http://{_server.HOST}:{_server.PORT}/healthz"
-        with urllib.request.urlopen(url, timeout=0.2) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return bool(data.get("ok") is True and data.get("service") == "clawchat-pet")
-    except Exception:
-        return False
-
-
 def _ensure_server_running() -> bool:
-    """Autostart the embedded server if no healthy one is already available.
+    """Start the embedded server owned by this plugin process.
 
-    Returns True when this call started an in-process server, and False when an
-    existing healthy server was reused. Repeated register() calls in one Hermes
-    process should not stack duplicate atexit handlers.
+    A process already listening on the configured port is always a conflict,
+    even if it looks like clawchat-pet. Repeated calls in this process are
+    handled by the owned runner and do not stack cleanup handlers.
     """
     global _AUTOSTART_REGISTERED
 
-    if _server_already_running():
-        return False
-
     from clawchat_pet import server
 
-    server.start_background()
+    started = server.start_background()
     if not _AUTOSTART_REGISTERED:
         atexit.register(server.stop_background)
         _AUTOSTART_REGISTERED = True
-    return True
+    return started
 
 
 def _ensure_liveware_running() -> bool:

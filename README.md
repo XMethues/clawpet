@@ -7,6 +7,9 @@ A Hermes Agent plugin that turns agent activity into a persistent cultivation pe
 - Starts and serves the local pet API and bundled web UI
 - Starts and manages the Liveware tunnel agent with the plugin lifecycle
 - Converts Hermes activity hooks into cultivation progress and event logs
+- Aggregates parallel tools, approvals, turns, and subagents into one activity display
+- Uses the current Petdex entry as pet identity while sharing cultivation progress
+- Stores an optional text-only personality independently for each Petdex slug
 - Supports pets, skins, realms, techniques, artifacts, daily policies, and idle progression
 - Registers the bundled `clawchat-pet` skill with Hermes
 
@@ -18,6 +21,7 @@ When Hermes loads the plugin, it ensures that:
 2. The Liveware tunnel agent is running
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
+Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hook delivery uses the versioned `POST /api/v1/events` endpoint; failed delivery is logged and dropped without replay.
 
 ## Frontend
 
@@ -33,6 +37,5 @@ npm run build    # rebuilds ../clawchat_pet/web/
 ## Tests
 
 ```bash
-PYTHONPATH=. python tests/test_liveware_lifecycle.py -v
-PYTHONPATH=. python tests/test_xianxia_tool_labels.py -v
+PYTHONPATH=. python3 -m unittest discover -s tests -v
 ```

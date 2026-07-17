@@ -3,8 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { api, AgentState, Cultivation, PetInfo, SkinInfo, Voice } from './api';
 import './styles/main.css';
 
-const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, jump: 4, failed: 5, waiting: 6, review: 8 };
-const LABELS: Record<string, string> = { idle: '入定', run: '历练', wave: '功成', jump: '跃迁', failed: '反噬', waiting: '候旨', review: '推演' };
+const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, jump: 4, failed: 5, waiting: 6, subagent: 7, review: 8, unknown: 8 };
 const SKIN_VAR_MAP: Record<string, string> = {
   bgMain: '--bg-main', panel: '--panel', panelSoft: '--panel-soft', accent: '--accent', accentSoft: '--accent-soft',
   textMain: '--text-main', textMuted: '--text-muted', gold: '--gold', border: '--border', track: '--track',
@@ -34,7 +33,7 @@ function applySkin(skin?: SkinInfo) {
 function TopBar({ pet, policy, skin }: { pet?: PetInfo; policy?: Cultivation['policy']; skin?: SkinInfo }) {
   const pname = policy?.label || policy?.name || '入定';
   return <div className="topbar">
-    <div className="name">{pet?.displayName || '银月'}</div>
+    <div className="name">{pet?.displayName || '宠物'}</div>
     <div className="top-actions">
       <span className="skin-chip">{skin?.name || '青冥道场'}</span>
       <span className={`policy-chip p-${policyClass(policy?.name)}`}>{pname}</span>
@@ -78,7 +77,7 @@ function Stat({ label, value }: { label: string; value: number }) { return <div 
 
 function SpeechBubble({ voice }: { voice?: Voice }) {
   const text = voice?.text || '我在。灵息很稳。';
-  return <div className={`bubble mood-${voice?.mood || 'idle'}`}><b>{voice?.speaker || '银月'}</b><span>{text}</span></div>;
+  return <div className={`bubble mood-${voice?.mood || 'idle'}`}><b>{voice?.speaker || '宠物'}</b><span>{text}</span></div>;
 }
 
 function PetStage({ pet, state }: { pet?: PetInfo; state: string }) {
@@ -122,12 +121,13 @@ function App() {
     api.currentSkin().then(r => setSkin(r.skin)).catch(() => {});
     const s = window.setInterval(() => api.state().then(setAgentState).catch(() => {}), 1000);
     const c = window.setInterval(() => api.cultivation().then(data => { setCultivation(data); if (data.voice) setVoice(data.voice); }).catch(() => {}), 2000);
+    const p = window.setInterval(() => api.currentPet().then(r => setPet(r.pet)).catch(() => {}), 2000);
     const v = window.setInterval(() => api.voice().then(setVoice).catch(() => {}), 6000);
     const sk = window.setInterval(() => api.currentSkin().then(r => setSkin(r.skin)).catch(() => {}), 8000);
     api.state().then(setAgentState).catch(() => {});
     api.cultivation().then(data => { setCultivation(data); if (data.voice) setVoice(data.voice); }).catch(() => {});
     api.voice().then(setVoice).catch(() => {});
-    return () => { window.clearInterval(s); window.clearInterval(c); window.clearInterval(v); window.clearInterval(sk); };
+    return () => { window.clearInterval(s); window.clearInterval(c); window.clearInterval(p); window.clearInterval(v); window.clearInterval(sk); };
   }, []);
 
   const state = agentState.state || 'idle';

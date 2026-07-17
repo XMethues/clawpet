@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
-STATE_FILE = HERMES_HOME / "pet_state.json"
 DATA_DIR = HERMES_HOME / "clawchat-pet"
 SAVE_DIR = DATA_DIR
 SAVE_FILE = SAVE_DIR / "cultivation.json"
@@ -191,7 +190,7 @@ for idx, phase in enumerate(["初期", "中期", "后期", "圆满"]):
 REALM_BY_KEY = {r["key"]: r for r in REALM_PATH}
 
 VOICE_LINES = {
-    "idle": ["我在。灵息很稳。", "先收一口气，等你下一道法旨。", "银月守着道场，不乱跑。"],
+    "idle": ["我在。灵息很稳。", "先收一口气，等你下一道法旨。", "守着道场，不乱跑。"],
     "review": ["我在推演这条因果线。", "等我看一眼天机纹路。", "这一步要想清楚，别急。"],
     "run": ["出剑。", "我去跑这一趟。", "正在历练，别眨眼。"],
     "wave": ["成了，灵气回流。", "这一剑收得干净。", "功成，记一笔。"],
@@ -274,7 +273,7 @@ def default_save() -> dict[str, Any]:
     ts = _now()
     return {
         "version": 2,
-        "profile": {"name": "银月", "pet_id": "yinyue-2", "created_at": ts, "last_active": ts},
+        "profile": {"name": "宠物", "pet_id": "yinyue-2", "created_at": ts, "last_active": ts},
         "policy": {"name": DEFAULT_POLICY, "label": DEFAULT_POLICY, "set_at": ts, "source": "default", "day": _policy_day(ts), "daily_switches": 0},
         "realm": {
             "key": "lianqi-1", "major": "炼气", "minor": 1, "phase": "稳定修行",
@@ -290,7 +289,7 @@ def default_save() -> dict[str, Any]:
         "techniques": {},
         "artifacts": {},
         "state": {"action": "入定吐纳", "current_event": "idle", "current_tool": "", "started_at": ts},
-        "voice": {"speaker": "银月", "mood": "calm", "text": "我在。灵息很稳。", "ts": ts, "event": "idle"},
+        "voice": {"speaker": "宠物", "mood": "calm", "text": "我在。灵息很稳。", "ts": ts, "event": "idle"},
         "breakthrough": {"quality_candidate": None, "last_attempt_at": None},
         "dormancy": {"idle_days": 0.0, "phase": "active", "label": "活跃", "last_applied_stage": 0},
         "counters": {
@@ -299,7 +298,7 @@ def default_save() -> dict[str, Any]:
             "breakthrough_failed_total": 0, "last_breakthrough_at": None, "last_regression_ts": 0,
         },
         "recent_window": {"size": WINDOW_SIZE, "events": []},
-        "event_log": [{"ts": ts, "type": "birth", "text": "银月入驻 clawchat-pet 道场，开始吐纳修行。"}],
+        "event_log": [{"ts": ts, "type": "birth", "text": "宠物入驻 clawchat-pet 道场，开始吐纳修行。"}],
         "internal": {"last_processed_ts": 0.0, "last_tick_ts": ts, "last_event_type": "", "last_failure_open": False, "processed_event_ids": []},
     }
 
@@ -350,37 +349,47 @@ def _pw(save: dict[str, Any], key: str, default: float = 1.0) -> float:
 def get_policy() -> dict[str, Any]:
     with _SAVE_LOCK:
         save = load_save()
-        policy = copy.deepcopy(_normalize_policy(save))
-        policy["available"] = list(POLICY_NAMES)
-        policy["profile"] = copy.deepcopy(POLICY_PROFILES.get(str(policy.get("name")), POLICY_PROFILES[DEFAULT_POLICY]))
+        policy = policy_state(save)
         _atomic_write(SAVE_FILE, save)
         return policy
 
 
-def set_policy(name: str, source: str = "plugin") -> dict[str, Any]:
+def policy_state(save: dict[str, Any]) -> dict[str, Any]:
+    policy = copy.deepcopy(_normalize_policy(save))
+    policy["available"] = list(POLICY_NAMES)
+    policy["profile"] = copy.deepcopy(
+        POLICY_PROFILES.get(str(policy.get("name")), POLICY_PROFILES[DEFAULT_POLICY])
+    )
+    return policy
+
+
+def apply_policy(save: dict[str, Any], name: str, source: str = "plugin") -> dict[str, Any]:
     name = str(name or "").strip()
     if name not in POLICY_PROFILES:
         raise ValueError(f"unknown policy: {name}; expected one of {', '.join(POLICY_NAMES)}")
+    policy = _normalize_policy(save)
+    today = _policy_day()
+    if policy.get("day") != today:
+        policy["day"] = today
+        policy["daily_switches"] = 0
+    changed = policy.get("name") != name
+    if changed:
+        policy["daily_switches"] = int(policy.get("daily_switches", 0) or 0) + 1
+    policy.update({"name": name, "label": name, "set_at": _now(), "source": source or "plugin", "day": today})
+    _log(save, "policy", f"今日修炼方针改为{name}。")
+    _set_voice(save, "policy", text=f"今日按{name}行事。")
+    _apply_ranges(save)
+    update_progress(save)
+    out = policy_state(save)
+    out["changed"] = bool(changed)
+    return out
+
+
+def set_policy(name: str, source: str = "plugin") -> dict[str, Any]:
     with _SAVE_LOCK:
         save = load_save()
-        policy = _normalize_policy(save)
-        today = _policy_day()
-        if policy.get("day") != today:
-            policy["day"] = today
-            policy["daily_switches"] = 0
-        changed = policy.get("name") != name
-        if changed:
-            policy["daily_switches"] = int(policy.get("daily_switches", 0) or 0) + 1
-        policy.update({"name": name, "label": name, "set_at": _now(), "source": source or "plugin", "day": today})
-        _log(save, "policy", f"今日修炼方针改为{name}。")
-        _set_voice(save, "policy", text=f"今日按{name}行事。")
-        _apply_ranges(save)
-        update_progress(save)
+        out = apply_policy(save, name, source)
         _atomic_write(SAVE_FILE, save)
-        out = copy.deepcopy(policy)
-        out["changed"] = bool(changed)
-        out["available"] = list(POLICY_NAMES)
-        out["profile"] = copy.deepcopy(POLICY_PROFILES[name])
         return out
 
 
@@ -466,7 +475,7 @@ def _set_voice(save: dict[str, Any], event: str, mood: str | None = None, text: 
         # deterministic-ish per second/event, avoids flicker every poll
         idx = int((_now() // 12) + len(save.get("event_log", []))) % len(pool)
         text = pool[idx]
-    save["voice"] = {"speaker": save.get("profile", {}).get("name", "银月"), "mood": mood or event, "text": text, "ts": _now(), "event": event}
+    save["voice"] = {"speaker": save.get("profile", {}).get("name", "宠物"), "mood": mood or event, "text": text, "ts": _now(), "event": event}
 
 
 def _bump_technique(save: dict[str, Any], tool: str, xp: float) -> None:
@@ -535,9 +544,6 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
     processed_ids = internal.setdefault("processed_event_ids", [])
     if event_id and event_id in processed_ids:
         return False
-    if ts and ts <= float(internal.get("last_processed_ts", 0)):
-        return False
-
     tool = _tool_from_state(raw)
     success = raw.get("success")
     stats = save["stats"]
@@ -555,7 +561,7 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
         stats["fatigue"] += 0.12
         counters["long_review_count"] += 1
         _recent(save, "review", tool)
-        _log(save, "review", "银月观天机流转，推演片刻，悟性微增。")
+        _log(save, "review", "宠物观天机流转，推演片刻，悟性微增。")
     elif state == "run":
         stats["fatigue"] += 0.35
         stats["karma"] += 0.18
@@ -572,7 +578,7 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
             counters["recovered_total"] += 1
             stats["dao_heart"] += 1.0
             stats["heart_demon"] -= 3.0 * _pw(save, "recovery_demon_w")
-            _log(save, "recovered", "银月斩去杂念，破除一缕心魔，道心 +1。")
+            _log(save, "recovered", "宠物斩去杂念，破除一缕心魔，道心 +1。")
         _bump_technique(save, tool, 2.4)
         _bump_artifact(save, tool, 1.7)
         _recent(save, "tool_success", tool)
@@ -593,13 +599,13 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
         stats["fatigue"] += 0.1
         stats["dao_heart"] += 0.03
         _recent(save, "waiting", tool)
-        _log(save, "waiting", "法旨未至，银月收剑静候。")
+        _log(save, "waiting", "法旨未至，宠物收剑静候。")
     elif state == "jump":
         stats["qi"] += 1.2 * _pw(save, "qi_w")
         stats["fate"] += 0.2
         stats["comprehension"] += 0.2 * _pw(save, "compr_w")
         _recent(save, "insight", tool)
-        _log(save, "insight", "灵光乍现，银月似有所悟。")
+        _log(save, "insight", "灵光乍现，宠物似有所悟。")
     elif state == "idle":
         _recent(save, "idle", tool)
 
@@ -610,11 +616,22 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
     try_resolve_tribulation(save, state)
     if event_id:
         processed_ids.append(event_id)
-        del processed_ids[:-200]
     internal["last_processed_ts"] = ts or _now()
     internal["last_event_type"] = state
     if save.get("voice", {}).get("event") not in {"breakthrough_pass", "breakthrough_fail"}:
         _set_voice(save, state)
+    return True
+
+
+def apply_cultivation_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
+    """Apply one durable event and all cultivation invariants around it."""
+    apply_idle_decay(save)
+    if not apply_event(save, raw):
+        return False
+    _apply_ranges(save)
+    check_breakthrough(save)
+    _apply_ranges(save)
+    update_progress(save)
     return True
 
 
@@ -675,7 +692,7 @@ def try_resolve_tribulation(save: dict[str, Any], trigger: str) -> bool:
     save["counters"]["breakthrough_success_total"] += 1
     save["counters"]["last_breakthrough_at"] = _now()
     save["breakthrough"]["quality_candidate"] = round(score, 1)
-    _log(save, "tribulation_pass", f"{rdef['label']}应劫而过，银月进入{save['realm']['label']}。")
+    _log(save, "tribulation_pass", f"{rdef['label']}应劫而过，宠物进入{save['realm']['label']}。")
     _set_voice(save, "breakthrough_pass", text=f"{rdef['label']}已过。现在是{save['realm']['label']}。")
     update_progress(save)
     return True
@@ -816,7 +833,7 @@ def check_breakthrough(save: dict[str, Any]) -> None:
     save["counters"]["last_breakthrough_at"] = now
     save["breakthrough"]["quality_candidate"] = round(score, 1)
     typ = "major_breakthrough" if rdef["kind"] == "major" else "minor_breakthrough"
-    _log(save, typ, f"气机圆满，银月突破至{save['realm']['label']}。")
+    _log(save, typ, f"气机圆满，宠物突破至{save['realm']['label']}。")
     _set_voice(save, "jump", text=f"突破了。现在是{save['realm']['label']}。")
     update_progress(save)
 
@@ -824,8 +841,7 @@ def check_breakthrough(save: dict[str, Any]) -> None:
 def tick_once() -> dict[str, Any]:
     with _SAVE_LOCK:
         save = load_save()
-        raw_file = _read_json(STATE_FILE) or {"state": "idle", "reason": "no file", "ts": _now()}
-        raw = _resolve_cult_state(raw_file)
+        raw = {"state": "idle", "reason": "no activity", "ts": _now()}
         now = _now()
         last_tick = float(save.setdefault("internal", {}).get("last_tick_ts", now) or now)
         dt = max(0.0, min(5.0, now - last_tick))
@@ -841,24 +857,6 @@ def tick_once() -> dict[str, Any]:
             _set_voice(save, str(save.get("state", {}).get("current_event") or raw.get("state") or "idle"))
         _atomic_write(SAVE_FILE, save)
         return public_state(save)
-
-
-def submit_event(payload: dict[str, Any]) -> dict[str, Any]:
-    """Synchronous event ingress for the HTTP server.
-
-    Hermes hooks POST here. There is no JSONL fallback; if the local server is
-    unavailable the hook drops the event after logging to plugin.log.
-    """
-    with _SAVE_LOCK:
-        save = load_save()
-        processed = apply_event(save, dict(payload or {}))
-        _apply_ranges(save)
-        check_breakthrough(save)
-        _apply_ranges(save)
-        _atomic_write(SAVE_FILE, save)
-        data = public_state(save)
-        data["processed"] = bool(processed)
-        return data
 
 
 def public_state(save: dict[str, Any] | None = None) -> dict[str, Any]:
