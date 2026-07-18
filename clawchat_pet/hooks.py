@@ -148,8 +148,8 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
             kwargs, ("approval_id", "request_id", "activity_id", "id"),
             pending_approval_ids,
         )
-        raw_mode = str(kwargs.get("approval_mode") or kwargs.get("mode") or "human").lower()
-        mode = "smart" if raw_mode in {"smart", "auto", "automatic"} or kwargs.get("is_smart_mode") else "human"
+        surface = str(kwargs.get("surface") or "cli").strip().lower()
+        mode = "smart" if surface == "smart" else "human"
         tool_activity_id = _identifier(
             kwargs, "tool_activity_id", "tool_call_id", "call_id", fallback=""
         )
@@ -165,7 +165,11 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
             kwargs, ("approval_id", "request_id", "activity_id", "id"),
             pending_approval_ids,
         )
-        decision = str(kwargs.get("decision") or kwargs.get("status") or "unknown")
+        decision = str(kwargs.get("choice") or "unknown").strip().lower()
+        if decision in {"deny", "smart_deny"}:
+            decision = "denied"
+        elif decision in {"once", "session", "always", "smart_approve"}:
+            decision = "approved"
         payload = {"activity_id": activity_id, "decision": decision}
         tool_activity_id = _identifier(
             kwargs, "tool_activity_id", "tool_call_id", "call_id", fallback=""

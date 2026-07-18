@@ -23,6 +23,18 @@ When Hermes loads the plugin, it ensures that:
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hook delivery uses the versioned `POST /api/v1/events` endpoint; failed delivery is logged and dropped without replay.
 
+## Python environment
+
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/). The
+project targets the same Python 3.11 minimum as Hermes Agent.
+
+```bash
+uv sync --locked
+```
+
+This creates a local `.venv` and installs the locked Pillow dependency used by
+the Petdex sprite pipeline.
+
 ## Frontend
 
 The complete Vite + React + TypeScript project is in [`frontend/`](frontend/). The generated production bundle is committed under `clawchat_pet/web/` so the plugin works immediately after installation.
@@ -37,5 +49,5 @@ npm run build    # rebuilds ../clawchat_pet/web/
 ## Tests
 
 ```bash
-PYTHONPATH=. python3 -m unittest discover -s tests -v
+uv run --locked python -m unittest discover -s tests -v
 ```

@@ -5,7 +5,7 @@ from pathlib import Path
 from clawchat_pet.activity import ActivityRuntime
 from clawchat_pet.hooks import register_hooks
 from clawchat_pet.server import ServerRunner
-from tests.test_activity_runtime import get_json
+from tests.test_activity_runtime import TEST_PETS, get_json
 
 
 class HookContext:
@@ -17,9 +17,35 @@ class HookContext:
 
 
 class VersionedHookTests(unittest.TestCase):
+    def test_smart_approval_surface_is_presented_as_inference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
+            runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
+            runner.start(host="127.0.0.1", port=0)
+            ctx = HookContext()
+            try:
+                register_hooks(ctx, server_url=runner.base_url)
+                ctx.callbacks["pre_approval_request"](
+                    command="git push",
+                    description="network access",
+                    pattern_key="network",
+                    pattern_keys=["network"],
+                    session_key="session-1",
+                    surface="smart",
+                )
+                activity = get_json(runner.base_url + "/state")
+            finally:
+                runner.stop()
+
+        self.assertEqual("review", activity["state"])
+
     def test_parallel_same_name_tools_without_hook_ids_remain_independent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             ctx = HookContext()
@@ -40,7 +66,9 @@ class VersionedHookTests(unittest.TestCase):
 
     def test_documented_hooks_emit_normalized_activity_and_tolerate_extra_kwargs(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             ctx = HookContext()
@@ -69,11 +97,11 @@ class VersionedHookTests(unittest.TestCase):
                     result={"ok": False, "error": "boom"},
                 )
                 ctx.callbacks["pre_approval_request"](
-                    approval_id="approval-1", approval_mode="human"
+                    approval_id="approval-1", surface="cli"
                 )
                 self.assertEqual("waiting", get_json(runner.base_url + "/state")["state"])
                 ctx.callbacks["post_approval_response"](
-                    approval_id="approval-1", decision="denied"
+                    approval_id="approval-1", choice="deny"
                 )
                 ctx.callbacks["subagent_start"](subagent_id="sub-1")
                 ctx.callbacks["subagent_stop"](subagent_id="sub-1", outcome="completed")
@@ -92,24 +120,26 @@ class VersionedHookTests(unittest.TestCase):
 
     def test_denied_approval_neutralizes_the_following_tool_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             ctx = HookContext()
             try:
                 register_hooks(ctx, server_url=runner.base_url)
-                for suffix, decision in (("denied", "denied"), ("timeout", "timeout")):
+                for suffix, choice in (("denied", "deny"), ("timeout", "timeout")):
                     tool_id = f"blocked-tool-{suffix}"
                     approval_id = f"approval-{suffix}"
                     ctx.callbacks["pre_tool_call"](
                         tool_name="terminal", tool_call_id=tool_id
                     )
                     ctx.callbacks["pre_approval_request"](
-                        approval_id=approval_id, approval_mode="human",
+                        approval_id=approval_id, surface="cli",
                         tool_call_id=tool_id,
                     )
                     ctx.callbacks["post_approval_response"](
-                        approval_id=approval_id, decision=decision,
+                        approval_id=approval_id, choice=choice,
                         tool_call_id=tool_id,
                     )
                     ctx.callbacks["post_tool_call"](
@@ -124,19 +154,72 @@ class VersionedHookTests(unittest.TestCase):
         self.assertEqual("unknown", activity["state"])
         self.assertEqual(0, cultivation["counters"]["tool_failed_total"])
 
+    def test_documented_rejection_choices_do_not_become_cultivation_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
+            runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
+            runner.start(host="127.0.0.1", port=0)
+            ctx = HookContext()
+            try:
+                register_hooks(ctx, server_url=runner.base_url)
+                for suffix, surface, choice in (
+                    ("deny", "cli", "deny"),
+                    ("timeout", "gateway", "timeout"),
+                    ("smart-deny", "smart", "smart_deny"),
+                ):
+                    tool_id = f"blocked-tool-{suffix}"
+                    ctx.callbacks["pre_tool_call"](
+                        tool_name="terminal", tool_call_id=tool_id
+                    )
+                    ctx.callbacks["pre_approval_request"](
+                        command="sudo true",
+                        description="privileged command",
+                        pattern_key="sudo",
+                        pattern_keys=["sudo"],
+                        session_key=f"session-{suffix}",
+                        surface=surface,
+                        tool_call_id=tool_id,
+                    )
+                    ctx.callbacks["post_approval_response"](
+                        command="sudo true",
+                        description="privileged command",
+                        pattern_key="sudo",
+                        pattern_keys=["sudo"],
+                        session_key=f"session-{suffix}",
+                        surface=surface,
+                        choice=choice,
+                        tool_call_id=tool_id,
+                    )
+                    ctx.callbacks["post_tool_call"](
+                        function_name="terminal",
+                        tool_call_id=tool_id,
+                        result={"ok": False, "error": "permission denied"},
+                    )
+                activity = get_json(runner.base_url + "/state")
+                cultivation = get_json(runner.base_url + "/cultivation")
+            finally:
+                runner.stop()
+
+        self.assertEqual("unknown", activity["state"])
+        self.assertEqual(0, cultivation["counters"]["tool_failed_total"])
+
     def test_parallel_idless_lifecycles_remain_independent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             ctx = HookContext()
             try:
                 register_hooks(ctx, server_url=runner.base_url)
 
-                ctx.callbacks["pre_approval_request"](approval_mode="human")
-                ctx.callbacks["pre_approval_request"](approval_mode="human")
+                ctx.callbacks["pre_approval_request"](surface="cli")
+                ctx.callbacks["pre_approval_request"](surface="gateway")
                 approvals_two = get_json(runner.base_url + "/state")
-                ctx.callbacks["post_approval_response"](decision="approved")
+                ctx.callbacks["post_approval_response"](choice="once")
                 approvals_one = get_json(runner.base_url + "/state")
 
                 ctx.callbacks["pre_llm_call"]()

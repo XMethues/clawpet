@@ -10,6 +10,12 @@ from clawchat_pet.activity import ActivityRuntime
 from clawchat_pet.server import ServerRunner
 from clawchat_pet.simulator import default_save
 
+TEST_PETS = [{
+    "slug": "yinyue-2", "displayName": "Pet", "source": "petdex",
+    "assetKind": "sprite", "cached": True,
+    "spriteUrl": "/api/v1/pets/yinyue-2/sprite.png",
+}]
+
 
 def post_json(url: str, payload: dict):
     request = urllib.request.Request(
@@ -40,7 +46,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
 
     def test_versioned_tool_start_is_accepted_once_and_legacy_payload_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(
                 activity_runtime=runtime,
                 bootstrap=lambda: None,
@@ -73,7 +81,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
 
     def test_parallel_tools_settle_independently_with_three_state_outcomes(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             try:
@@ -114,7 +124,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
 
     def test_approval_turn_and_subagent_lifecycles_follow_activity_priority(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             send = lambda event: post_json(runner.base_url + "/api/v1/events", event)
@@ -151,7 +163,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
     def test_persistence_failure_commits_neither_cultivation_nor_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            runtime = ActivityRuntime(runtime_dir / "cultivation.json")
+            runtime = ActivityRuntime(
+                runtime_dir / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             try:
@@ -179,11 +193,11 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
     def test_restart_forgets_transient_activity_and_recent_result(self):
         with tempfile.TemporaryDirectory() as tmp:
             save = Path(tmp) / "cultivation.json"
-            first = ActivityRuntime(save)
+            first = ActivityRuntime(save, pet_catalog=TEST_PETS)
             first.ingest(self.event(
                 "start", 1, "tool_started", activity_id="tool", tool_name="read_file"
             ))
-            restarted = ActivityRuntime(save)
+            restarted = ActivityRuntime(save, pet_catalog=TEST_PETS)
 
         self.assertEqual("run", first.activity_state()["state"])
         self.assertEqual("idle", restarted.activity_state()["state"])
@@ -194,7 +208,7 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
             save = default_save()
             save["stats"]["qi"] = 29.0
             save_file.write_text(json.dumps(save), encoding="utf-8")
-            runtime = ActivityRuntime(save_file)
+            runtime = ActivityRuntime(save_file, pet_catalog=TEST_PETS)
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             try:
@@ -212,7 +226,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
 
     def test_event_id_remains_duplicate_after_more_than_two_hundred_later_events(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             first = self.event(
                 "durable-success", 1, "tool_completed", activity_id="tool",
                 tool_name="read_file", outcome="success"
@@ -231,7 +247,9 @@ class ActivityRuntimeHTTPTests(unittest.TestCase):
 
     def test_policy_and_log_share_the_server_runtime_store_with_events(self):
         with tempfile.TemporaryDirectory() as tmp:
-            runtime = ActivityRuntime(Path(tmp) / "cultivation.json")
+            runtime = ActivityRuntime(
+                Path(tmp) / "cultivation.json", pet_catalog=TEST_PETS
+            )
             runner = ServerRunner(activity_runtime=runtime, bootstrap=lambda: None)
             runner.start(host="127.0.0.1", port=0)
             try:
