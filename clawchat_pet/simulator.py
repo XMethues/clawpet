@@ -376,7 +376,7 @@ def apply_policy(save: dict[str, Any], name: str, source: str = "plugin") -> dic
     if changed:
         policy["daily_switches"] = int(policy.get("daily_switches", 0) or 0) + 1
     policy.update({"name": name, "label": name, "set_at": _now(), "source": source or "plugin", "day": today})
-    _log(save, "policy", f"今日修炼方针改为{name}。")
+    _log(save, "policy", f"今日修炼方针改为{name}。", {"policy": name})
     _set_voice(save, "policy", text=f"今日按{name}行事。")
     _apply_ranges(save)
     update_progress(save)
@@ -444,11 +444,25 @@ def _tool_from_state(raw: dict[str, Any]) -> str:
     return ""
 
 
-def _log(save: dict[str, Any], typ: str, text: str) -> None:
+def _log(
+    save: dict[str, Any],
+    typ: str,
+    text: str,
+    data: dict[str, Any] | None = None,
+) -> None:
     logs = save.setdefault("event_log", [])
-    if logs and logs[-1].get("type") == typ and logs[-1].get("text") == text and _now() - float(logs[-1].get("ts", 0)) < 3:
+    if (
+        logs
+        and logs[-1].get("type") == typ
+        and logs[-1].get("text") == text
+        and (logs[-1].get("data") or {}) == (data or {})
+        and _now() - float(logs[-1].get("ts", 0)) < 3
+    ):
         return
-    logs.append({"ts": _now(), "type": typ, "text": text})
+    event = {"ts": _now(), "type": typ, "text": text}
+    if data:
+        event["data"] = copy.deepcopy(data)
+    logs.append(event)
     del logs[:-LOG_SIZE]
 
 
@@ -488,7 +502,12 @@ def _bump_technique(save: dict[str, Any], tool: str, xp: float) -> None:
         t["xp"] -= t["xp_next"]
         t["level"] = int(t.get("level", 1)) + 1
         t["xp_next"] = round(float(t.get("xp_next", 20)) * 1.5, 1)
-        _log(save, "technique_up", f"{name} 小有所成，提升至 Lv.{t['level']}。")
+        _log(
+            save,
+            "technique_up",
+            f"{name} 小有所成，提升至 Lv.{t['level']}。",
+            {"tool": tool, "level": t["level"]},
+        )
 
 
 def _bump_artifact(save: dict[str, Any], tool: str, xp: float) -> None:
@@ -505,7 +524,12 @@ def _bump_artifact(save: dict[str, Any], tool: str, xp: float) -> None:
             a["grade"] = "灵器"
         if a["level"] >= 6 and a.get("grade") == "灵器":
             a["grade"] = "法宝"
-        _log(save, "artifact_up", f"{name} 受因果淬炼，提升至 Lv.{a['level']}。")
+        _log(
+            save,
+            "artifact_up",
+            f"{name} 受因果淬炼，提升至 Lv.{a['level']}。",
+            {"tool": tool, "level": a["level"]},
+        )
 
 
 def _apply_ranges(save: dict[str, Any]) -> None:
@@ -561,7 +585,7 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
         stats["fatigue"] += 0.12
         counters["long_review_count"] += 1
         _recent(save, "review", tool)
-        _log(save, "review", "宠物观天机流转，推演片刻，悟性微增。")
+        _log(save, "review", "宠物观天机流转，推演片刻，悟性微增。", {"tool": tool})
     elif state == "run":
         stats["fatigue"] += 0.35
         stats["karma"] += 0.18
@@ -578,12 +602,17 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
             counters["recovered_total"] += 1
             stats["dao_heart"] += 1.0
             stats["heart_demon"] -= 3.0 * _pw(save, "recovery_demon_w")
-            _log(save, "recovered", "宠物斩去杂念，破除一缕心魔，道心 +1。")
+            _log(save, "recovered", "宠物斩去杂念，破除一缕心魔，道心 +1。", {"stability_gain": 1.0})
         _bump_technique(save, tool, 2.4)
         _bump_artifact(save, tool, 1.7)
         _recent(save, "tool_success", tool)
         label = _tool_label(tool)
-        _log(save, "tool_success", f"历练功成{('：' + label) if label else ''}，灵气 +{qi_gain:.1f}。")
+        _log(
+            save,
+            "tool_success",
+            f"历练功成{('：' + label) if label else ''}，灵气 +{qi_gain:.1f}。",
+            {"tool": tool, "primary_gain": qi_gain},
+        )
         internal["last_failure_open"] = False
     elif state == "failed":
         counters["tool_failed_total"] += 1
@@ -592,20 +621,25 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
         stats["tribulation_pressure"] += 0.6
         _recent(save, "tool_failed", tool)
         label = _tool_label(tool)
-        _log(save, "tool_failed", f"因果反噬{('：' + label) if label else ''}，心魔滋生。")
+        _log(
+            save,
+            "tool_failed",
+            f"因果反噬{('：' + label) if label else ''}，心魔滋生。",
+            {"tool": tool},
+        )
         internal["last_failure_open"] = True
     elif state == "waiting":
         counters["waiting_total"] += 1
         stats["fatigue"] += 0.1
         stats["dao_heart"] += 0.03
         _recent(save, "waiting", tool)
-        _log(save, "waiting", "法旨未至，宠物收剑静候。")
+        _log(save, "waiting", "法旨未至，宠物收剑静候。", {"tool": tool})
     elif state == "jump":
         stats["qi"] += 1.2 * _pw(save, "qi_w")
         stats["fate"] += 0.2
         stats["comprehension"] += 0.2 * _pw(save, "compr_w")
         _recent(save, "insight", tool)
-        _log(save, "insight", "灵光乍现，宠物似有所悟。")
+        _log(save, "insight", "灵光乍现，宠物似有所悟。", {"tool": tool})
     elif state == "idle":
         _recent(save, "idle", tool)
 
@@ -692,7 +726,12 @@ def try_resolve_tribulation(save: dict[str, Any], trigger: str) -> bool:
     save["counters"]["breakthrough_success_total"] += 1
     save["counters"]["last_breakthrough_at"] = _now()
     save["breakthrough"]["quality_candidate"] = round(score, 1)
-    _log(save, "tribulation_pass", f"{rdef['label']}应劫而过，宠物进入{save['realm']['label']}。")
+    _log(
+        save,
+        "tribulation_pass",
+        f"{rdef['label']}应劫而过，宠物进入{save['realm']['label']}。",
+        {"stage_index": save["realm"]["path_index"]},
+    )
     _set_voice(save, "breakthrough_pass", text=f"{rdef['label']}已过。现在是{save['realm']['label']}。")
     update_progress(save)
     return True
@@ -756,7 +795,12 @@ def _apply_idle_stage(save: dict[str, Any], stage: int) -> None:
             stats["heart_demon"] = max(0.0, float(stats.get("heart_demon", 0)) - 20.0)
             stats["qi"] = min(float(stats.get("qi", 0)), float(stats.get("max_qi", 30)) * 0.30)
             save["counters"]["last_regression_ts"] = _now()
-            _log(save, "idle_regression", f"五日未温养，道基浮动，境界跌落至{save['realm']['label']}。")
+            _log(
+                save,
+                "idle_regression",
+                f"五日未温养，道基浮动，境界跌落至{save['realm']['label']}。",
+                {"stage_index": save["realm"]["path_index"]},
+            )
             _set_voice(save, "idle_regression")
         else:
             _log(save, "idle_decay", "五日未动，道基久未温养；状态尚可，未跌境。")
@@ -809,7 +853,12 @@ def check_breakthrough(save: dict[str, Any]) -> None:
         stats["heart_demon"] -= 35
         stats["qi"] = min(stats["qi"], stats["max_qi"] * 0.45)
         save["counters"]["last_regression_ts"] = now
-        _log(save, "regression", f"心魔过盛，境界跌落至{save['realm']['label']}。")
+        _log(
+            save,
+            "regression",
+            f"心魔过盛，境界跌落至{save['realm']['label']}。",
+            {"stage_index": save["realm"]["path_index"]},
+        )
 
     update_progress(save)
     if not save["realm"].get("breakthrough_ready"):
@@ -833,7 +882,12 @@ def check_breakthrough(save: dict[str, Any]) -> None:
     save["counters"]["last_breakthrough_at"] = now
     save["breakthrough"]["quality_candidate"] = round(score, 1)
     typ = "major_breakthrough" if rdef["kind"] == "major" else "minor_breakthrough"
-    _log(save, typ, f"气机圆满，宠物突破至{save['realm']['label']}。")
+    _log(
+        save,
+        typ,
+        f"气机圆满，宠物突破至{save['realm']['label']}。",
+        {"stage_index": save["realm"]["path_index"]},
+    )
     _set_voice(save, "jump", text=f"突破了。现在是{save['realm']['label']}。")
     update_progress(save)
 

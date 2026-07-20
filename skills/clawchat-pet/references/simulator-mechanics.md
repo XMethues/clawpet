@@ -1,6 +1,6 @@
 # Simulator Mechanics Notes
 
-Use this reference when explaining or tuning realm progression, trials, and risk.
+Use this reference when explaining or tuning the shared progression curve, trials, and risk. The headings below use the default xianxia scene labels; other gameplay scenes project the same values and thresholds with different names.
 
 ## Realm Path
 
@@ -56,4 +56,4 @@ The feel should be: neglect creates pressure, but the game does not punish norma
 
 ## Event Delivery Rule
 
-Cultivation events are immediate. If the local game service is briefly unavailable, that event is skipped rather than queued for later replay. This keeps the game simple and avoids delayed surprise jumps.
+Growth events are immediate. If the local game service is briefly unavailable, that event is skipped rather than queued for later replay. This keeps the game simple and avoids delayed surprise jumps.

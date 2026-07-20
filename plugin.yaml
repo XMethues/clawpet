@@ -1,7 +1,7 @@
 manifest_version: 1
 name: clawchat-pet
 version: "0.3.0"
-description: "Hermes hooks + cultivation simulator + Petdex frontend service."
+description: "Hermes hooks + shared pet growth + selectable gameplay scenes."
 provides_hooks:
   - pre_llm_call
   - pre_tool_call

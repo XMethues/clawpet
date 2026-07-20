@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .gameplay import DEFAULT_SCENE_ID, GameplayScenes
 from .simulator import (
     apply_cultivation_event,
     apply_policy,
@@ -47,7 +48,13 @@ def _merge_defaults(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any
 class ActivityRuntime:
     """Own persistent cultivation and transient activity for one server."""
 
-    def __init__(self, cultivation_file: Path, pet_catalog=None, pet_provider=None) -> None:
+    def __init__(
+        self,
+        cultivation_file: Path,
+        pet_catalog=None,
+        pet_provider=None,
+        gameplay_scenes: GameplayScenes | None = None,
+    ) -> None:
         self.cultivation_file = Path(cultivation_file)
         self.legacy_cultivation_file = (
             self.cultivation_file.parent.parent / "cultivation" / "yinyue.json"
@@ -57,6 +64,8 @@ class ActivityRuntime:
             self.cultivation_file.parent.parent / "yinyue-dao" / "current_pet.json"
         )
         self.personalities_file = self.cultivation_file.parent / "personalities.json"
+        self.presentation_file = self.cultivation_file.parent / "presentation.json"
+        self._gameplay_scenes = gameplay_scenes or GameplayScenes()
         self._pet_catalog = {
             str(item["slug"]): copy.deepcopy(item) for item in (pet_catalog or [])
         } if pet_catalog is not None else None
@@ -261,6 +270,65 @@ class ActivityRuntime:
         with self._lock:
             logs = public_state(self._load()).get("event_log", [])[-limit:]
             return {"events": logs, "count": len(logs)}
+
+    def _load_presentation(self) -> dict[str, Any]:
+        try:
+            data = json.loads(self.presentation_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError, TypeError):
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        active_scene = str(data.get("active_scene") or DEFAULT_SCENE_ID)
+        try:
+            self._gameplay_scenes.get(active_scene)
+        except KeyError:
+            active_scene = DEFAULT_SCENE_ID
+        return {"version": 1, "active_scene": active_scene}
+
+    def _write_presentation(self, presentation: dict[str, Any]) -> None:
+        self.presentation_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.presentation_file.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(presentation, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(tmp, self.presentation_file)
+
+    def list_gameplay_scenes(self) -> dict[str, Any]:
+        with self._lock:
+            active_scene = self._load_presentation()["active_scene"]
+            return self._gameplay_scenes.catalog(active_scene)
+
+    def current_gameplay_scene(self) -> dict[str, Any]:
+        with self._lock:
+            active_scene = self._load_presentation()["active_scene"]
+            scene = self._gameplay_scenes.get(active_scene).summary()
+            scene["active"] = True
+            return scene
+
+    def select_gameplay_scene(self, scene_id: str) -> dict[str, Any]:
+        scene_id = str(scene_id or "").strip()
+        with self._lock:
+            scene = self._gameplay_scenes.get(scene_id)
+            self._write_presentation({"version": 1, "active_scene": scene_id})
+            selected = scene.summary()
+            selected["active"] = True
+            return selected
+
+    def experience_state(self) -> dict[str, Any]:
+        with self._lock:
+            save = self._load()
+            active_scene = self._load_presentation()["active_scene"]
+            pet = self.current_pet()
+            personality = self.personality(pet["slug"])
+            activity = self.activity_state()
+            return self._gameplay_scenes.project(
+                active_scene,
+                save,
+                activity,
+                pet,
+                personality,
+            )
 
     def _catalog(self) -> dict[str, dict[str, Any]]:
         if self._pet_catalog is not None:

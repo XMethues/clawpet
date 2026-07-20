@@ -1,16 +1,17 @@
 # clawchat-pet
 
-A Hermes Agent plugin that turns agent activity into a persistent cultivation pet experience for ClawChat.
+A Hermes Agent plugin that turns agent activity into one persistent pet growth journey and projects it through selectable gameplay scenes for ClawChat.
 
 ## Features
 
 - Starts and serves the local pet API and bundled web UI
 - Starts and manages the Liveware tunnel agent with the plugin lifecycle
-- Converts Hermes activity hooks into cultivation progress and event logs
+- Converts Hermes activity hooks into shared growth progress and structured event facts
 - Aggregates parallel tools, approvals, turns, and subagents into one activity display
-- Uses the current Petdex entry as pet identity while sharing cultivation progress
+- Uses the current Petdex entry as pet identity while sharing progress across pets and scenes
 - Stores an optional text-only personality independently for each Petdex slug
-- Supports pets, skins, realms, techniques, artifacts, daily policies, and idle progression
+- Ships xianxia and star-voyage scene adapters over the same settlement rules
+- Supports pets, skins, stages, capabilities, assets, daily strategies, and idle progression
 - Registers the bundled `clawchat-pet` skill with Hermes
 
 ## Runtime
@@ -22,6 +23,23 @@ When Hermes loads the plugin, it ensures that:
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hook delivery uses the versioned `POST /api/v1/events` endpoint; failed delivery is logged and dropped without replay.
+
+Growth remains in `cultivation.json` for compatibility. The selected gameplay scene is stored separately in `presentation.json`, so changing scenes never rewrites or replays growth.
+
+## Gameplay scenes
+
+The generic frontend reads one projected experience view:
+
+```text
+GET  /api/v1/experience
+GET  /api/v1/scenes
+GET  /api/v1/scenes/current
+POST /api/v1/scenes/current   {"id":"star-voyage"}
+```
+
+`xianxia` is the default scene and `star-voyage` is the second built-in adapter. Existing `/cultivation`, `/state`, and `/voice` routes remain available as compatibility interfaces.
+
+To add a built-in scene, define another `SceneDefinition` in `clawchat_pet/gameplay.py` and register it in the default `GameplayScenes` tuple. A scene supplies all stage, meter, strategy, activity, voice, capability, asset, and chronicle labels for the fixed shared-growth slots. It must not receive a settlement callback or return progress deltas; gameplay formulas remain exclusively in `simulator.py`. Add the new adapter together with projection tests that compare its meter values and stage index against `xianxia` for the same saved progress.
 
 ## Python environment
 
