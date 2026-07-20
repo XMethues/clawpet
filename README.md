@@ -5,7 +5,7 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 ## Features
 
 - Starts and serves the local pet API and bundled web UI
-- Starts and manages the Liveware tunnel agent with the plugin lifecycle
+- Ensures one fixed `ClawPet` Liveware app is logged in, created, bound, and registered
 - Converts Hermes activity hooks into shared growth progress and structured event facts
 - Aggregates parallel tools, approvals, turns, and subagents into one activity display
 - Uses the current Petdex entry as pet identity while sharing progress across pets and scenes
@@ -19,7 +19,14 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 When Hermes loads the plugin, it ensures that:
 
 1. The pet service is available on `127.0.0.1:54321`
-2. The Liveware tunnel agent is running
+2. A Liveware app named `ClawPet` exists and is bound to that service
+3. The app is registered in ClawChat and the Liveware tunnel agent is running
+
+Publication repair runs in a background startup worker so Liveware or ClawChat
+failures do not block the Gateway. A valid saved Liveware login and an existing
+`ClawPet` app are reused. The binding is refreshed on every startup because the
+Liveware CLI does not expose a binding query; app creation and ClawChat
+registration only run when missing or stale.
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 One authoritative runtime owns `save.json`, its lock, and atomic commits. Shared growth, current pet, per-pet personalities, current scene/skin, and per-skin visual overrides live in that one save. Petdex sprite/index files are cache, not product state. Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hermes hooks call the runtime directly in-process.

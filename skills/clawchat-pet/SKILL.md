@@ -1,7 +1,7 @@
 ---
 name: clawchat-pet
 description: "Use for clawchat-pet pet, personality, gameplay scene, skin, and strategy changes."
-version: 0.5.0
+version: 0.5.1
 author: clawchat-pet
 license: MIT
 platforms: [linux, macos]
@@ -59,6 +59,7 @@ Supported line groups are `idle`, `review`, `run`, `wave`, `failed`, `waiting`, 
 
 ## Invariants
 
+- External publication is plugin-owned and always uses the fixed Liveware and ClawChat name `ClawPet`; do not create per-pet publication apps.
 - `yinyue-2` is the default Petdex slug, not a special identity. Confirm changes using `displayName`.
 - Pet switching never resets shared growth, scene, or skin.
 - Personality is per pet and affects only text-bubble utterances. If `prompt_personality` is true after switching, ask once whether to configure it; neutral suppresses future prompts and reset makes it undecided again.

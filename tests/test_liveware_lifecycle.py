@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,6 +110,7 @@ class PluginRegistrationTests(unittest.TestCase):
         ctx = Mock()
         with (
             patch.object(plugin, "_ensure_server_running") as pet_start,
+            patch.object(plugin, "_start_liveware_publication") as publication_start,
             patch("clawchat_pet.liveware.ensure_running") as liveware_start,
             patch("clawchat_pet.server.get_runtime", return_value=Mock()),
         ):
@@ -116,6 +118,69 @@ class PluginRegistrationTests(unittest.TestCase):
 
         pet_start.assert_called_once_with()
         liveware_start.assert_called_once_with()
+        publication_start.assert_called_once_with()
+
+    def test_register_schedules_clawpet_publication_during_startup(self):
+        plugin = load_plugin_entrypoint()
+        ctx = Mock()
+        threads = []
+
+        class CapturedThread:
+            def __init__(self, *, target, name, daemon):
+                self.target = target
+                self.name = name
+                self.daemon = daemon
+                self.started = False
+                threads.append(self)
+
+            def start(self):
+                self.started = True
+
+            def is_alive(self):
+                return self.started
+
+        with (
+            patch.object(plugin, "_ensure_server_running"),
+            patch("clawchat_pet.liveware.ensure_running"),
+            patch("clawchat_pet.server.get_runtime", return_value=Mock()),
+            patch("threading.Thread", CapturedThread),
+        ):
+            plugin.register(ctx)
+
+        self.assertEqual(1, len(threads))
+        self.assertEqual("clawchat-pet-publication", threads[0].name)
+        self.assertTrue(threads[0].daemon)
+        self.assertTrue(threads[0].started)
+
+    def test_publication_failure_does_not_block_gateway_startup(self):
+        plugin = load_plugin_entrypoint()
+        ctx = Mock()
+
+        class ImmediateThread:
+            def __init__(self, *, target, name, daemon):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def is_alive(self):
+                return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(os.environ, {"HERMES_HOME": tmp}),
+                patch.object(plugin, "_ensure_server_running"),
+                patch("clawchat_pet.liveware.ensure_running") as liveware_start,
+                patch("clawchat_pet.server.get_runtime", return_value=Mock()),
+                patch("threading.Thread", ImmediateThread),
+                self.assertLogs("clawchat-pet", level="ERROR") as logs,
+            ):
+                plugin.register(ctx)
+
+        self.assertEqual(2, liveware_start.call_count)
+        self.assertTrue(any(
+            "publication startup failed" in entry for entry in logs.output
+        ))
 
 
 if __name__ == "__main__":
