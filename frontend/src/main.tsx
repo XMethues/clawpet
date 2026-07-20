@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, AgentState, Cultivation, PetInfo, SkinInfo, Voice } from './api';
+import { api, Experience, Meter, PetInfo, SkinInfo, Voice } from './api';
 import './styles/main.css';
 
 const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, jump: 4, failed: 5, waiting: 6, subagent: 7, review: 8, unknown: 8 };
@@ -10,15 +10,16 @@ const SKIN_VAR_MAP: Record<string, string> = {
   bubbleBg: '--bubble-bg', bubbleBorder: '--bubble-border', bubbleText: '--bubble-text', qi: '--qi', demon: '--demon', glow: '--glow',
 };
 
-function pct(v: unknown, max: unknown) {
-  const n = Number(v || 0), m = Number(max || 1);
-  return Math.max(0, Math.min(100, Math.round(n / Math.max(1, m) * 100)));
+function pct(value: number, maximum: number) {
+  return Math.max(0, Math.min(100, Math.round(value / Math.max(1, maximum) * 100)));
 }
-function num(v: unknown) { return Math.round(Number(v || 0) * 10) / 10; }
+function num(value: number | undefined) { return Math.round(Number(value || 0) * 10) / 10; }
 
-function policyClass(name?: string) {
-  const map: Record<string, string> = { '入定': 'ruding', '冲关': 'chongguan', '淬心': 'cuixin', '悟道': 'wudao', '调息': 'tiaoxi' };
-  return map[name || ''] || 'default';
+function strategyClass(id?: string) {
+  const map: Record<string, string> = {
+    balanced: 'ruding', advance: 'chongguan', stabilize: 'cuixin', learn: 'wudao', recover: 'tiaoxi',
+  };
+  return map[id || ''] || 'default';
 }
 
 function applySkin(skin?: SkinInfo) {
@@ -30,53 +31,52 @@ function applySkin(skin?: SkinInfo) {
   });
 }
 
-function TopBar({ pet, policy, skin }: { pet?: PetInfo; policy?: Cultivation['policy']; skin?: SkinInfo }) {
-  const pname = policy?.label || policy?.name || '入定';
+function TopBar({ experience }: { experience?: Experience }) {
   return <div className="topbar">
-    <div className="name">{pet?.displayName || '宠物'}</div>
+    <div className="name">{experience?.pet?.displayName || '宠物'}</div>
     <div className="top-actions">
-      <span className="skin-chip">{skin?.name || '青冥道场'}</span>
-      <span className={`policy-chip p-${policyClass(policy?.name)}`}>{pname}</span>
+      <span className="skin-chip">{experience?.scene?.name || '成长旅程'}</span>
+      <span className={`policy-chip p-${strategyClass(experience?.strategy?.id)}`}>{experience?.strategy?.label || '平衡'}</span>
     </div>
   </div>;
 }
 
-function RealmPanel({ cultivation }: { cultivation?: Cultivation }) {
-  const r = cultivation?.realm;
-  const next = cultivation?.progress?.next_breakthrough;
-  const pathIndex = Number(r?.path_index ?? 0) + 1;
-  const pathTotal = Number(r?.path_total ?? 28);
-  const kind = String(next?.type || '');
-  const isTrial = kind === 'tribulation' || String(r?.label || '').includes('试炼');
-  const isHuashen = String(r?.label || '').includes('化神');
-  const badge = isTrial ? '试炼' : isHuashen ? '化神' : String(r?.phase || r?.label || '').slice(0, 4);
+function GrowthPanel({ experience }: { experience?: Experience }) {
+  const stage = experience?.stage;
+  const meters = experience?.meters || [];
+  const attributes = experience?.attributes || [];
+  const isTrial = stage?.kind === 'tribulation' || stage?.kind === 'gate';
   return <>
     <div className="realm-row">
       <div>
-        <div className="realm-title"><span className="realm-label">{r?.label || '炼气1层'}</span><span className={`phase-badge ${isTrial ? 'trial' : isHuashen ? 'huashen' : ''}`}>{badge}</span></div>
-        <div className="realm-path">{pathIndex} / {pathTotal} · 下境：{next?.to || '炼气2层'}</div>
+        <div className="realm-title">
+          <span className="realm-label">{stage?.label || '成长起点'}</span>
+          <span className={`phase-badge ${isTrial ? 'trial' : ''}`}>{stage?.badge || '启程'}</span>
+        </div>
+        <div className="realm-path">{Number(stage?.index || 0) + 1} / {stage?.total || 1} · 下一阶段：{stage?.next_label || '等待开启'}</div>
       </div>
     </div>
     <div className="bars">
-      <Bar label="灵气" value={num(cultivation?.stats?.qi)} max={num(cultivation?.stats?.max_qi || 30)} kind="qi" />
-      <Bar label="心魔" value={num(cultivation?.stats?.heart_demon)} max={100} kind="demon" />
+      {meters.slice(0, 2).map(meter => <Bar key={meter.id} meter={meter} />)}
     </div>
     <div className="stats">
-      <Stat label="道心" value={num(cultivation?.stats?.dao_heart)} />
-      <Stat label="悟性" value={num(cultivation?.stats?.comprehension)} />
-      <Stat label="疲劳" value={num(cultivation?.stats?.fatigue)} />
-      <Stat label="气运" value={num(cultivation?.stats?.fate)} />
+      {attributes.slice(0, 4).map(attribute => <Stat key={attribute.id} meter={attribute} />)}
     </div>
-    {r?.breakthrough_hint ? <div className={r.breakthrough_ready ? 'hint ready' : 'hint'}>{r.breakthrough_hint}</div> : null}
+    {stage?.hint ? <div className={stage.ready ? 'hint ready' : 'hint'}>{stage.hint}</div> : null}
   </>;
 }
-function Bar({ label, value, max, kind }: { label: string; value: number; max: number; kind: string }) {
-  return <div className="barbox"><div className="barhead"><span>{label}</span><span>{value} / {max}</span></div><div className="track"><div className={`fill ${kind}`} style={{ width: `${pct(value, max)}%` }} /></div></div>;
+
+function Bar({ meter }: { meter: Meter }) {
+  const maximum = Number(meter.max || 1);
+  return <div className="barbox">
+    <div className="barhead"><span>{meter.label}</span><span>{num(meter.value)} / {num(maximum)}</span></div>
+    <div className="track"><div className={`fill ${meter.tone || meter.id}`} style={{ width: `${pct(meter.value, maximum)}%` }} /></div>
+  </div>;
 }
-function Stat({ label, value }: { label: string; value: number }) { return <div className="stat"><b>{label}</b><span>{value}</span></div>; }
+function Stat({ meter }: { meter: Meter }) { return <div className="stat"><b>{meter.label}</b><span>{num(meter.value)}</span></div>; }
 
 function SpeechBubble({ voice }: { voice?: Voice }) {
-  const text = voice?.text || '我在。灵息很稳。';
+  const text = voice?.text || '我在这里。';
   return <div className={`bubble mood-${voice?.mood || 'idle'}`}><b>{voice?.speaker || '宠物'}</b><span>{text}</span></div>;
 }
 
@@ -91,7 +91,7 @@ function PetStage({ pet, state }: { pet?: PetInfo; state: string }) {
   useEffect(() => {
     setFrame(0);
     const ms = Math.max(90, Math.round(1100 / meta.frames));
-    const id = window.setInterval(() => setFrame(f => (f + 1) % meta.frames), ms);
+    const id = window.setInterval(() => setFrame(value => (value + 1) % meta.frames), ms);
     return () => window.clearInterval(id);
   }, [meta.frames, state, pet?.slug]);
   return <div className="middle"><div className="pet-area"><div className="frame" style={{ width: meta.cw, height: meta.ch }}><div className="sprite" style={{
@@ -102,41 +102,33 @@ function PetStage({ pet, state }: { pet?: PetInfo; state: string }) {
   }} /></div></div></div>;
 }
 
-function EventLog({ cultivation }: { cultivation?: Cultivation }) {
-  const logs = (cultivation?.event_log || []).slice(-5).reverse();
-  return <div className="logbox"><div className="log-title"><span>道场纪事</span><span>{cultivation?.realm?.breakthrough_ready ? '可突破' : ''}</span></div><ul>{logs.length ? logs.map((l, i) => <li key={`${l.ts}-${i}`}>{l.text}</li>) : <li>等待道场事件……</li>}</ul></div>;
+function Chronicle({ experience }: { experience?: Experience }) {
+  const entries = (experience?.chronicle?.entries || []).slice(-5).reverse();
+  return <div className="logbox">
+    <div className="log-title"><span>{experience?.chronicle?.title || '旅程纪事'}</span><span>{experience?.stage?.ready ? '可推进' : ''}</span></div>
+    <ul>{entries.length ? entries.map((entry, index) => <li key={`${entry.ts}-${index}`}>{entry.text}</li>) : <li>等待新的成长事件……</li>}</ul>
+  </div>;
 }
 
 function App() {
-  const [agentState, setAgentState] = useState<AgentState>({ state: 'idle' });
-  const [cultivation, setCultivation] = useState<Cultivation>();
-  const [voice, setVoice] = useState<Voice>();
-  const [pet, setPet] = useState<PetInfo>();
-  const [skin, setSkin] = useState<SkinInfo>();
+  const [experience, setExperience] = useState<Experience>();
 
-  useEffect(() => { applySkin(skin); }, [skin]);
+  useEffect(() => { applySkin(experience?.skin); }, [experience?.skin]);
 
   useEffect(() => {
-    api.currentPet().then(r => setPet(r.pet)).catch(() => {});
-    api.currentSkin().then(r => setSkin(r.skin)).catch(() => {});
-    const s = window.setInterval(() => api.state().then(setAgentState).catch(() => {}), 1000);
-    const c = window.setInterval(() => api.cultivation().then(data => { setCultivation(data); if (data.voice) setVoice(data.voice); }).catch(() => {}), 2000);
-    const p = window.setInterval(() => api.currentPet().then(r => setPet(r.pet)).catch(() => {}), 2000);
-    const v = window.setInterval(() => api.voice().then(setVoice).catch(() => {}), 6000);
-    const sk = window.setInterval(() => api.currentSkin().then(r => setSkin(r.skin)).catch(() => {}), 8000);
-    api.state().then(setAgentState).catch(() => {});
-    api.cultivation().then(data => { setCultivation(data); if (data.voice) setVoice(data.voice); }).catch(() => {});
-    api.voice().then(setVoice).catch(() => {});
-    return () => { window.clearInterval(s); window.clearInterval(c); window.clearInterval(p); window.clearInterval(v); window.clearInterval(sk); };
+    const refresh = () => api.experience().then(setExperience).catch(() => {});
+    refresh();
+    const interval = window.setInterval(refresh, 1000);
+    return () => window.clearInterval(interval);
   }, []);
 
-  const state = agentState.state || 'idle';
-  return <div className="shell" data-skin={skin?.id || 'qingming'}>
-    <TopBar pet={pet} policy={cultivation?.policy} skin={skin} />
-    <RealmPanel cultivation={cultivation} />
-    <div className="bubble-wrap"><SpeechBubble voice={voice || cultivation?.voice} /></div>
-    <PetStage pet={pet} state={state} />
-    <EventLog cultivation={cultivation} />
+  const state = experience?.activity?.state || 'idle';
+  return <div className="shell" data-scene={experience?.scene?.id || 'xianxia'} data-skin={experience?.skin?.id || 'qingming'}>
+    <TopBar experience={experience} />
+    <GrowthPanel experience={experience} />
+    <div className="bubble-wrap"><SpeechBubble voice={experience?.voice} /></div>
+    <PetStage pet={experience?.pet} state={state} />
+    <Chronicle experience={experience} />
   </div>;
 }
 

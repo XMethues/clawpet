@@ -16,6 +16,8 @@ Do not create scheduled prompts unless the owner asks.
 
 ## Policy Choices
 
+The five choices are shared rule profiles. The xianxia scene labels them as below; `star-voyage` presents the same profiles as 标准巡航、全速跃迁、加固护盾、深空扫描、停泊检修 in the same order.
+
 ```text
 入定
   Stable/default. Good when the owner is away or wants low risk.

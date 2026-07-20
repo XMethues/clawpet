@@ -15,6 +15,10 @@ class BundledSkillContractTests(unittest.TestCase):
         self.assertIn("prompt_personality", skill)
         self.assertIn("/api/v1/pets/current", skill)
         self.assertIn("/api/v1/pets/{slug}/personality", skill)
+        self.assertIn("/api/v1/experience", skill)
+        self.assertIn("/api/v1/scenes/current", skill)
+        self.assertIn("shared growth", skill)
+        self.assertIn("star-voyage", skill)
         for action in ("configure", "neutral", "reset"):
             self.assertIn(action, skill)
         self.assertIn("yinyue-2", skill)

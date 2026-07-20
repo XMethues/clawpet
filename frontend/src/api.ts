@@ -1,41 +1,11 @@
-export type AgentState = { state: string; reason?: string; ts?: number };
-export type Voice = { speaker: string; mood: string; text: string; ts: number; event: string };
-export type Cultivation = {
-  realm: {
-    key?: string;
-    label: string;
-    phase?: string;
-    path_index?: number;
-    path_total?: number;
-    breakthrough_ready?: boolean;
-    breakthrough_hint?: string;
-  };
-  stats: Record<string, number>;
-  state?: { action?: string; current_event?: string; current_tool?: string };
-  policy?: {
-    name: string;
-    label?: string;
-    set_at?: number;
-    source?: string;
-    day?: string;
-    daily_switches?: number;
-    available?: string[];
-  };
-  dormancy?: { idle_days?: number; phase?: string; label?: string; last_applied_stage?: number };
-  voice?: Voice;
-  event_log?: Array<{ ts: number; type: string; text: string }>;
-  progress?: {
-    next_breakthrough?: {
-      to?: string;
-      type?: string;
-      qi_required?: number;
-      heart_demon_max?: number;
-      fatigue_max?: number;
-      dao_heart_min?: number;
-      comprehension_min?: number;
-    };
-  };
+export type Voice = {
+  speaker: string;
+  mood: string;
+  text: string;
+  ts: number;
+  event: string;
 };
+
 export type PetInfo = {
   slug: string;
   displayName: string;
@@ -53,6 +23,7 @@ export type PetInfo = {
   columns?: number;
   frames?: Record<string, number>;
 };
+
 export type SkinInfo = {
   id: string;
   name: string;
@@ -67,6 +38,60 @@ export type SkinInfo = {
   active?: boolean;
 };
 
+export type SceneInfo = {
+  id: string;
+  name: string;
+  description?: string;
+  recommended_skin?: string;
+  active?: boolean;
+};
+
+export type Meter = {
+  id: string;
+  label: string;
+  value: number;
+  max?: number;
+  tone?: string;
+};
+
+export type Experience = {
+  schema_version: 1;
+  scene: SceneInfo;
+  pet: PetInfo;
+  activity: {
+    state: string;
+    reason?: string;
+    ts?: number;
+    label?: string;
+    in_flight?: Record<string, number>;
+    capability?: { id: string; label: string } | null;
+  };
+  stage: {
+    id: string;
+    index: number;
+    total: number;
+    label: string;
+    badge: string;
+    kind: string;
+    next_label: string;
+    ready: boolean;
+    hint?: string;
+  };
+  meters: Meter[];
+  attributes: Meter[];
+  strategy: {
+    id: string;
+    label: string;
+    choices: Array<{ id: string; label: string }>;
+  };
+  voice: Voice;
+  chronicle: {
+    title: string;
+    entries: Array<{ ts: number; kind: string; text: string; legacy?: boolean }>;
+  };
+  skin: SkinInfo;
+};
+
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { cache: 'no-store', ...init });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -74,9 +99,11 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  state: () => json<AgentState>('/state'),
-  cultivation: () => json<Cultivation>('/cultivation'),
-  voice: () => json<Voice>('/voice'),
-  currentPet: () => json<{ pet: PetInfo }>('/api/v1/pets/current'),
-  currentSkin: () => json<{ skin: SkinInfo }>('/api/v1/skins/current'),
+  experience: () => json<Experience>('/api/v1/experience'),
+  scenes: () => json<{ current_scene: string; scenes: SceneInfo[]; count: number }>('/api/v1/scenes'),
+  selectScene: (id: string) => json<{ scene: SceneInfo }>('/api/v1/scenes/current', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  }),
 };

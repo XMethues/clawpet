@@ -91,6 +91,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 self._send_json(self.server.activity_runtime.pet_selection(slug))
                 return
+            if path == "/api/v1/scenes/current":
+                body = self._read_body_json()
+                scene_id = str(body.get("id") or body.get("scene") or "").strip()
+                if not scene_id:
+                    self._send_json({"error": "id required"}, 400)
+                    return
+                self._send_json({
+                    "scene": self.server.activity_runtime.select_gameplay_scene(scene_id)
+                })
+                return
             pet_path = [unquote(part) for part in path.removeprefix("/api/v1/pets/").split("/") if part]
             if len(pet_path) == 2 and pet_path[1] == "personality":
                 body = self._read_body_json()
@@ -153,6 +163,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             if path in ("/voice", "/api/v1/query/voice"):
                 self._send_json(self.server.activity_runtime.voice_state())
+                return
+            if path == "/api/v1/experience":
+                experience = self.server.activity_runtime.experience_state()
+                experience["skin"] = skin_registry.current_skin()
+                self._send_json(experience)
+                return
+            if path == "/api/v1/scenes":
+                self._send_json(self.server.activity_runtime.list_gameplay_scenes())
+                return
+            if path == "/api/v1/scenes/current":
+                self._send_json({
+                    "scene": self.server.activity_runtime.current_gameplay_scene()
+                })
                 return
             if path == "/api/v1/policy":
                 self._send_json({"policy": self.server.activity_runtime.get_policy()})
@@ -240,7 +263,18 @@ class ServerRunner:
         self.bootstrap = bootstrap
         self.httpd: ReusableTCPServer | None = None
         self.thread: threading.Thread | None = None
+        self.bootstrap_thread: threading.Thread | None = None
         self.lock = threading.Lock()
+
+    def _run_bootstrap(self) -> None:
+        try:
+            self.bootstrap()
+        except Exception as exc:
+            print(
+                f"clawchat-pet runtime warm failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     @property
     def base_url(self) -> str:
@@ -257,14 +291,27 @@ class ServerRunner:
                 self.httpd = ReusableTCPServer(
                     (host, port), Handler, self.activity_runtime
                 )
-                self.bootstrap()
+                self.thread = threading.Thread(
+                    target=self.httpd.serve_forever,
+                    name="clawchat-pet-http",
+                    daemon=True,
+                )
+                self.thread.start()
+                self.bootstrap_thread = threading.Thread(
+                    target=self._run_bootstrap,
+                    name="clawchat-pet-warm",
+                    daemon=True,
+                )
+                self.bootstrap_thread.start()
             except Exception:
                 if self.httpd is not None:
+                    if self.thread is not None and self.thread.is_alive():
+                        self.httpd.shutdown()
                     self.httpd.server_close()
                     self.httpd = None
+                self.thread = None
+                self.bootstrap_thread = None
                 raise
-            self.thread = threading.Thread(target=self.httpd.serve_forever, name="clawchat-pet-http", daemon=True)
-            self.thread.start()
             print(f"clawchat-pet listening on {self.base_url}", flush=True)
             return True
 
@@ -275,6 +322,7 @@ class ServerRunner:
                 self.httpd.server_close()
                 self.httpd = None
             self.thread = None
+            self.bootstrap_thread = None
 
 
 _runner = ServerRunner()

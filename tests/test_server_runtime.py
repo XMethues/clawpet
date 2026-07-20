@@ -32,6 +32,42 @@ class HealthyLookalikeHandler(http.server.BaseHTTPRequestHandler):
 
 
 class ServerRuntimeTests(unittest.TestCase):
+    def test_health_is_available_while_runtime_bootstrap_is_still_warming(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bootstrap_started = threading.Event()
+            release_bootstrap = threading.Event()
+
+            def slow_bootstrap():
+                bootstrap_started.set()
+                release_bootstrap.wait(timeout=2)
+
+            runner = ServerRunner(
+                runtime_dir=Path(tmp),
+                bootstrap=slow_bootstrap,
+            )
+            start_thread = threading.Thread(
+                target=lambda: runner.start(host="127.0.0.1", port=0),
+                daemon=True,
+            )
+            start_thread.start()
+            try:
+                self.assertTrue(bootstrap_started.wait(timeout=1))
+                with urllib.request.urlopen(
+                    runner.base_url + "/healthz", timeout=0.2
+                ) as response:
+                    health = json.load(response)
+                start_thread.join(timeout=0.2)
+                self.assertFalse(
+                    start_thread.is_alive(),
+                    "server start must not wait for pet warm-up",
+                )
+            finally:
+                release_bootstrap.set()
+                start_thread.join(timeout=2)
+                runner.stop()
+
+        self.assertEqual("clawchat-pet", health["service"])
+
     def test_runtime_serves_health_and_state_from_an_isolated_ephemeral_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)

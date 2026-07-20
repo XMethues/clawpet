@@ -1,18 +1,18 @@
 ---
 name: clawchat-pet
-description: "Use for clawchat-pet pet switching, Petdex identity, per-pet personality, cultivation progress, policy, and gameplay tuning."
+description: "Use for clawchat-pet pet switching, Petdex identity, per-pet personality, shared growth, gameplay scenes, policy, and gameplay tuning."
 version: 0.3.0
 author: clawchat-pet
 license: MIT
 platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [hermes, plugin, petdex, xianxia]
+    tags: [hermes, plugin, petdex, scenes, xianxia]
 ---
 
 # clawchat-pet
 
-`clawchat-pet` turns Hermes activity into a shared cultivation journey presented by the currently selected Petdex pet. Pet identity and personality may change; cultivation progress does not.
+`clawchat-pet` turns Hermes activity into one shared growth journey presented by the currently selected Petdex pet and gameplay scene. Pet identity, personality, and scene may change; settled progress does not.
 
 ## Runtime interface
 
@@ -24,6 +24,10 @@ GET  /api/v1/pets/current
 POST /api/v1/pets/current                  {"slug":"boba"}
 GET  /api/v1/pets/{slug}/personality
 POST /api/v1/pets/{slug}/personality
+GET  /api/v1/experience
+GET  /api/v1/scenes
+GET  /api/v1/scenes/current
+POST /api/v1/scenes/current                 {"id":"star-voyage"}
 GET  /cultivation
 GET  /state
 GET  /voice
@@ -42,7 +46,18 @@ When the owner asks to switch pets:
 5. If `prompt_personality` is true, ask once whether to create a personality.
 6. If false, do not prompt during ordinary switching.
 
-Switching never resets or copies cultivation progress.
+Switching never resets or copies shared growth progress and never changes the selected gameplay scene.
+
+## Gameplay scene workflow
+
+Built-in scene IDs are `xianxia` and `star-voyage`; `xianxia` is the default. When the owner asks to change the world or gameplay scene:
+
+1. GET `/api/v1/scenes` and resolve the requested scene by ID or name.
+2. POST `/api/v1/scenes/current` with the chosen ID.
+3. Confirm using the returned scene `name`.
+4. Do not reset, copy, replay, or translate settled progress.
+
+Scene changes only reinterpret stable growth facts. They do not change rewards, penalties, stage thresholds, event deduplication, the current Petdex pet, or pet personality. Use `GET /api/v1/experience` for the current scene-projected view; `/cultivation` is the legacy xianxia-shaped compatibility view.
 
 ## Personality workflow
 
@@ -85,11 +100,11 @@ neutral    use neutral utterances without prompting
 reset      return to undecided and allow a future prompt
 ```
 
-Never change cultivation stats, policies, rewards, penalties, or progress while editing personality.
+Never change growth stats, policies, rewards, penalties, scenes, or progress while editing personality.
 
-## Cultivation model
+## Shared growth model
 
-Hermes activities produce one-time cultivation events and a separate aggregate activity display. Success may reward progress, actual tool failure may penalize it, and unknown results are neutral. Approval denial, approval timeout, interrupted turns, and subagent lifecycle events are neutral.
+Hermes activities produce one-time growth events and a separate aggregate activity display. Success may reward progress, actual tool failure may penalize it, and unknown results are neutral. Approval denial, approval timeout, interrupted turns, and subagent lifecycle events are neutral.
 
 Activity priority:
 
@@ -97,6 +112,6 @@ Activity priority:
 候旨 > direct tool / 历练 > 分神化身 > recent result > 推演 > 入定
 ```
 
-Core stats are 灵气、心魔、道心、悟性、疲劳、气运. The daily policies are 入定、冲关、淬心、悟道、调息. Ask once when policy intent is ambiguous; do not create scheduled prompts unless explicitly requested.
+The formulas still use the established xianxia compatibility fields 灵气、心魔、道心、悟性、疲劳、气运 and policies 入定、冲关、淬心、悟道、调息. Other scenes project stable meter and strategy IDs into their own labels without changing those formulas. Ask once when policy intent is ambiguous; do not create scheduled prompts unless explicitly requested.
 
 See the bundled references for event delivery, policy guidance, and simulator mechanics.
