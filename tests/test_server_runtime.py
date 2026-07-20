@@ -1,4 +1,5 @@
 import http.server
+import importlib.util
 import json
 import os
 import socket
@@ -34,6 +35,32 @@ class HealthyLookalikeHandler(http.server.BaseHTTPRequestHandler):
 
 
 class ServerRuntimeTests(unittest.TestCase):
+    def test_bundled_skill_is_registered_for_discovery(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "clawchat_pet_plugin_skill_test",
+            repo_root / "__init__.py",
+        )
+        plugin = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(plugin)
+        calls = []
+
+        class Context:
+            def register_skill(self, name, path, description=None, **options):
+                calls.append((name, path, description, options))
+
+        plugin._register_skill(Context())
+
+        self.assertEqual(1, len(calls))
+        name, path, description, options = calls[0]
+        self.assertEqual("clawchat-pet", name)
+        self.assertEqual(
+            repo_root / "skills" / "clawchat-pet" / "SKILL.md",
+            path,
+        )
+        self.assertIn("玩法场景", description)
+        self.assertEqual({"discoverable": True}, options)
+
     def test_health_is_available_while_runtime_bootstrap_is_still_warming(self):
         with tempfile.TemporaryDirectory() as tmp:
             bootstrap_started = threading.Event()
@@ -126,7 +153,7 @@ class Context:
     def register_hook(self, name, callback):
         pass
 
-    def register_skill(self, name, path, description=None):
+    def register_skill(self, name, path, description=None, **options):
         pass
 
 path = Path.cwd() / "__init__.py"
@@ -179,7 +206,7 @@ class Context:
     def register_hook(self, name, callback):
         pass
 
-    def register_skill(self, name, path, description=None):
+    def register_skill(self, name, path, description=None, **options):
         pass
 
 path = Path.cwd() / "__init__.py"

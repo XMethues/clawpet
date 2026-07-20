@@ -1,7 +1,7 @@
 ---
 name: clawchat-pet
-description: "Use for clawchat-pet pet, personality, gameplay scene, skin, and strategy changes."
-version: 0.5.1
+description: "用于查询或修改 ClawPet 宠物、玩法场景、皮肤、人格和成长策略."
+version: 0.5.2
 author: clawchat-pet
 license: MIT
 platforms: [linux, macos]

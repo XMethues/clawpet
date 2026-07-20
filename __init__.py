@@ -43,7 +43,7 @@ def _skill_description(skill_path: Path) -> str:
 
 
 def _register_skill(ctx) -> None:
-    """Register the bundled skill as an explicit plugin skill only."""
+    """Register the bundled skill for namespaced prompt discovery."""
     global _SKILL_REGISTERED
     if _SKILL_REGISTERED:
         return
@@ -57,6 +57,7 @@ def _register_skill(ctx) -> None:
         "clawchat-pet",
         skill_path,
         description=_skill_description(skill_path),
+        discoverable=True,
     )
     _SKILL_REGISTERED = True
 
