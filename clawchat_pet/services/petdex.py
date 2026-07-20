@@ -14,13 +14,8 @@ from PIL import Image
 
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 CACHE_ROOT = HERMES_HOME / "clawchat-pet" / "cache"
-LEGACY_CACHE_ROOT = HERMES_HOME / "yinyue-dao" / "cache"
 PETS_CACHE = CACHE_ROOT / "pets"
-LEGACY_PETS_CACHE = LEGACY_CACHE_ROOT / "pets"
 INDEX_FILE = CACHE_ROOT / "petdex-index.json"
-LEGACY_INDEX_FILE = LEGACY_CACHE_ROOT / "petdex-index.json"
-CURRENT_FILE = HERMES_HOME / "clawchat-pet" / "current_pet.json"
-LEGACY_CURRENT_FILE = HERMES_HOME / "yinyue-dao" / "current_pet.json"
 PETDEX_URL = "https://petdex.dev/"
 UA = "Mozilla/5.0 (Hermes clawchat-pet)"
 
@@ -135,18 +130,19 @@ def _write_meta(slug_dir: Path, info: PetInfo) -> None:
 
 
 def _read_meta(slug: str) -> PetInfo | None:
-    for p in (PETS_CACHE / slug / "meta.json", LEGACY_PETS_CACHE / slug / "meta.json"):
-        if not p.exists():
-            continue
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            info = PetInfo(**{k: v for k, v in data.items() if k in PetInfo.__dataclass_fields__})
-            # Always serve through the current plugin API path even when metadata came from legacy cache.
-            info.spriteUrl = f"/api/v1/pets/{slug}/sprite.png"
-            return info
-        except Exception:
-            continue
-    return None
+    path = PETS_CACHE / slug / "meta.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        info = PetInfo(**{
+            key: value for key, value in data.items()
+            if key in PetInfo.__dataclass_fields__
+        })
+        info.spriteUrl = f"/assets/pets/{slug}.png"
+        return info
+    except Exception:
+        return None
 
 
 def _local_pet(slug: str, pet_dir: Path) -> PetInfo | None:
@@ -230,10 +226,9 @@ def _extract_petdex_index(html: str) -> list[PetInfo]:
 
 def refresh_index(force: bool = False) -> list[PetInfo]:
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    if not force and (INDEX_FILE.exists() or LEGACY_INDEX_FILE.exists()):
+    if not force and INDEX_FILE.exists():
         try:
-            index_path = INDEX_FILE if INDEX_FILE.exists() else LEGACY_INDEX_FILE
-            data = json.loads(index_path.read_text(encoding="utf-8"))
+            data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
             if time.time() - float(data.get("ts", 0)) < 24 * 3600:
                 remote = [PetInfo(**x) for x in data.get("pets", [])]
                 return merge_with_local(remote)
@@ -262,10 +257,9 @@ def list_pets(force: bool = False) -> list[PetInfo]:
         return refresh_index(force=force)
     except Exception:
         cached: list[PetInfo] = []
-        index_path = INDEX_FILE if INDEX_FILE.exists() else LEGACY_INDEX_FILE
-        if index_path.exists():
+        if INDEX_FILE.exists():
             try:
-                data = json.loads(index_path.read_text(encoding="utf-8"))
+                data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
                 cached = [PetInfo(**x) for x in data.get("pets", [])]
             except Exception:
                 cached = []
@@ -317,7 +311,7 @@ def ensure_cached(slug: str) -> PetInfo:
         assetUrl=pet.assetUrl,
         assetKind=pet.assetKind,
         cached=True,
-        spriteUrl=f"/api/v1/pets/{pet.slug}/sprite.png",
+        spriteUrl=f"/assets/pets/{pet.slug}.png",
         width=scan["width"],
         height=scan["height"],
         cellWidth=scan["cellWidth"],
@@ -328,27 +322,6 @@ def ensure_cached(slug: str) -> PetInfo:
         updatedAt=time.time(),
     )
     _write_meta(slug_dir, info)
-    return info
-
-
-def current_pet() -> PetInfo:
-    slug = "yinyue-2"
-    current_path = CURRENT_FILE if CURRENT_FILE.exists() else LEGACY_CURRENT_FILE
-    if current_path.exists():
-        try:
-            slug = json.loads(current_path.read_text(encoding="utf-8")).get("slug") or slug
-        except Exception:
-            pass
-    try:
-        return ensure_cached(slug)
-    except Exception:
-        return ensure_cached("yinyue-2")
-
-
-def set_current_pet(slug: str) -> PetInfo:
-    info = ensure_cached(slug)
-    CURRENT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CURRENT_FILE.write_text(_json_response({"slug": slug, "updatedAt": time.time()}), encoding="utf-8")
     return info
 
 

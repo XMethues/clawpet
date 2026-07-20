@@ -110,6 +110,7 @@ class PluginRegistrationTests(unittest.TestCase):
         with (
             patch.object(plugin, "_ensure_server_running") as pet_start,
             patch("clawchat_pet.liveware.ensure_running") as liveware_start,
+            patch("clawchat_pet.server.get_runtime", return_value=Mock()),
         ):
             plugin.register(ctx)
 

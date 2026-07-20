@@ -56,4 +56,4 @@ The feel should be: neglect creates pressure, but the game does not punish norma
 
 ## Event Delivery Rule
 
-Growth events are immediate. If the local game service is briefly unavailable, that event is skipped rather than queued for later replay. This keeps the game simple and avoids delayed surprise jumps.
+Growth events are immediate. If their atomic runtime commit fails, the event is skipped rather than queued for later replay. This keeps the game simple and avoids delayed surprise jumps.

@@ -11,7 +11,9 @@ import unittest
 import urllib.request
 from pathlib import Path
 
+from clawchat_pet.runtime import ClawchatPetRuntime
 from clawchat_pet.server import ServerRunner
+from tests.test_runtime_v2 import PETS
 
 
 class HealthyLookalikeHandler(http.server.BaseHTTPRequestHandler):
@@ -68,21 +70,20 @@ class ServerRuntimeTests(unittest.TestCase):
 
         self.assertEqual("clawchat-pet", health["service"])
 
-    def test_runtime_serves_health_and_state_from_an_isolated_ephemeral_server(self):
+    def test_runtime_serves_health_and_presentation_from_an_isolated_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            (runtime_dir / "pet_state.json").write_text(
-                json.dumps({"state": "run", "reason": "integration-test", "ts": 4102444800}),
-                encoding="utf-8",
+            runner = ServerRunner(
+                runtime=ClawchatPetRuntime(runtime_dir, pet_catalog=PETS),
+                bootstrap=lambda: None,
             )
-            runner = ServerRunner(runtime_dir=runtime_dir, bootstrap=lambda: None)
 
             runner.start(host="127.0.0.1", port=0)
             try:
                 with urllib.request.urlopen(runner.base_url + "/healthz", timeout=1) as response:
                     health = json.load(response)
-                with urllib.request.urlopen(runner.base_url + "/state", timeout=1) as response:
-                    state = json.load(response)
+                with urllib.request.urlopen(runner.base_url + "/presentation", timeout=1) as response:
+                    presentation = json.load(response)
             finally:
                 runner.stop()
 
@@ -90,8 +91,8 @@ class ServerRuntimeTests(unittest.TestCase):
             "ok": health["ok"],
             "service": health["service"],
         })
-        self.assertEqual("idle", state["state"])
-        self.assertEqual("no activity", state["reason"])
+        self.assertEqual("idle", presentation["activity"]["state"])
+        self.assertEqual("xianxia", presentation["scene"]["id"])
 
     def test_repeated_start_keeps_one_owned_server(self):
         with tempfile.TemporaryDirectory() as tmp:

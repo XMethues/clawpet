@@ -12,19 +12,12 @@ from typing import Any, Mapping, Protocol
 from .simulator import (
     ARTIFACT_BY_TOOL,
     POLICY_NAMES,
+    STRATEGY_ID_BY_POLICY,
     REALM_PATH,
     TECHNIQUE_BY_TOOL,
 )
 
 DEFAULT_SCENE_ID = "xianxia"
-
-STRATEGY_ID_BY_POLICY = {
-    "入定": "balanced",
-    "冲关": "advance",
-    "淬心": "stabilize",
-    "悟道": "learn",
-    "调息": "recover",
-}
 
 CAPABILITY_ID_BY_TOOL = {
     "terminal": "command-execution",
@@ -125,21 +118,6 @@ STAR_STAGE_BADGES = tuple(
 )
 
 
-def _sanitize_xianxia_log_text(typ: str, text: str) -> str:
-    """Keep legacy xianxia facts readable without exposing raw tool names."""
-    if typ not in {"tool_success", "tool_failed"} or "：" not in text:
-        return text
-    prefix, rest = text.split("：", 1)
-    if "，" not in rest:
-        return text
-    raw_tool, suffix = rest.split("，", 1)
-    if raw_tool in TECHNIQUE_BY_TOOL:
-        return f"{prefix}：{TECHNIQUE_BY_TOOL[raw_tool]}，{suffix}"
-    if raw_tool.replace("_", "").isalnum() and raw_tool.isascii():
-        return f"{prefix}：无名术法，{suffix}"
-    return text
-
-
 class GameplayScene(Protocol):
     """Internal seam implemented by each gameplay-scene adapter."""
 
@@ -177,7 +155,8 @@ class SceneDefinition:
     chronicle_templates: Mapping[str, str]
     voice_lines: Mapping[str, tuple[str, ...]]
     chronicle_title: str
-    recommended_skin: str
+    default_skin_id: str
+    skin_ids: tuple[str, ...]
     preserve_fact_text: bool = False
 
     def __post_init__(self) -> None:
@@ -196,15 +175,16 @@ class SceneDefinition:
             raise ValueError(f"scene {self.id!r} is missing strategy labels")
         if {"trial_ready", "cap", "ready", "target"} - set(self.hint_templates):
             raise ValueError(f"scene {self.id!r} is missing hint templates")
-        if "legacy" not in self.chronicle_templates and not self.preserve_fact_text:
-            raise ValueError(f"scene {self.id!r} requires a legacy chronicle template")
+        if "unknown" not in self.chronicle_templates and not self.preserve_fact_text:
+            raise ValueError(f"scene {self.id!r} requires an unknown-event template")
 
     def summary(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
-            "recommended_skin": self.recommended_skin,
+            "default_skin_id": self.default_skin_id,
+            "skin_ids": list(self.skin_ids),
         }
 
     def _tool_label(self, tool: str) -> str:
@@ -273,10 +253,10 @@ class SceneDefinition:
             "event": event,
         }
 
-    def _chronicle_text(self, event: Mapping[str, Any]) -> tuple[str, bool]:
+    def _chronicle_text(self, event: Mapping[str, Any]) -> str:
         text = str(event.get("text") or "")
         if self.preserve_fact_text:
-            return _sanitize_xianxia_log_text(str(event.get("type") or ""), text), False
+            return text
         typ = str(event.get("type") or "")
         data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
         tool = str(data.get("tool") or "")
@@ -288,7 +268,7 @@ class SceneDefinition:
             else typ
         )
         template = self.chronicle_templates.get(
-            template_key, self.chronicle_templates["legacy"]
+            template_key, self.chronicle_templates["unknown"]
         )
         stage_index = int(data.get("stage_index") or 0)
         stage_index = max(0, min(stage_index, len(self.stage_labels) - 1))
@@ -303,7 +283,7 @@ class SceneDefinition:
             strategy=self.strategy_labels[strategy_id],
             level=int(data.get("level") or 1),
         )
-        return rendered, not bool(data) and typ != "birth"
+        return rendered
 
     def project(
         self,
@@ -363,15 +343,14 @@ class SceneDefinition:
             }
             for name in POLICY_NAMES
         ]
-        current_tool = str((save.get("state") or {}).get("current_tool") or "")
+        activity_view = copy.deepcopy(dict(activity))
+        current_tool = str(activity_view.pop("current_tool", "") or "")
         chronicle_entries = []
         for event in save.get("event_log") or []:
-            rendered, legacy = self._chronicle_text(event)
             chronicle_entries.append({
                 "ts": float(event.get("ts") or 0),
                 "kind": str(event.get("type") or "unknown"),
-                "text": rendered,
-                "legacy": legacy,
+                "text": self._chronicle_text(event),
             })
         capabilities = []
         for stored_name, item in (save.get("techniques") or {}).items():
@@ -399,7 +378,7 @@ class SceneDefinition:
             "scene": self.summary(),
             "pet": copy.deepcopy(dict(pet)),
             "activity": {
-                **copy.deepcopy(dict(activity)),
+                **activity_view,
                 "label": self.action_labels.get(str(activity.get("state") or "idle"), ""),
                 "capability": {
                     "id": CAPABILITY_ID_BY_TOOL.get(current_tool, f"tool:{current_tool}"),
@@ -473,7 +452,8 @@ XIANXIA_SCENE = SceneDefinition(
     chronicle_templates={},
     voice_lines={},
     chronicle_title="道场纪事",
-    recommended_skin="qingming",
+    default_skin_id="qingming",
+    skin_ids=("qingming", "chiyan", "xuanshui"),
     preserve_fact_text=True,
 )
 
@@ -525,7 +505,7 @@ STAR_VOYAGE_SCENE = SceneDefinition(
         "idle": "长期停泊使航行状态有所衰减，宠物正在重新校准。",
         "technique_up": "{tool}熟练度提升至 Lv.{level}。",
         "artifact_up": "{asset}完成一次模块升级。",
-        "legacy": "一段早期成长记录来自切换玩法场景之前。",
+        "unknown": "记录到一项尚未分类的成长事实。",
     },
     voice_lines={
         "idle": ("航线稳定，随时可以出发。",),
@@ -538,7 +518,8 @@ STAR_VOYAGE_SCENE = SceneDefinition(
         "subagent": ("僚机已经出发协作。",),
     },
     chronicle_title="远征日志",
-    recommended_skin="qingming",
+    default_skin_id="xinghai",
+    skin_ids=("xinghai", "chenhui"),
 )
 
 

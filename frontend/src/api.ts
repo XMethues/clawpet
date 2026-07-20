@@ -42,7 +42,8 @@ export type SceneInfo = {
   id: string;
   name: string;
   description?: string;
-  recommended_skin?: string;
+  default_skin_id: string;
+  skin_ids: string[];
   active?: boolean;
 };
 
@@ -87,7 +88,7 @@ export type Experience = {
   voice: Voice;
   chronicle: {
     title: string;
-    entries: Array<{ ts: number; kind: string; text: string; legacy?: boolean }>;
+    entries: Array<{ ts: number; kind: string; text: string }>;
   };
   skin: SkinInfo;
 };
@@ -99,11 +100,5 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  experience: () => json<Experience>('/api/v1/experience'),
-  scenes: () => json<{ current_scene: string; scenes: SceneInfo[]; count: number }>('/api/v1/scenes'),
-  selectScene: (id: string) => json<{ scene: SceneInfo }>('/api/v1/scenes/current', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  }),
+  presentation: () => json<Experience>('/presentation'),
 };

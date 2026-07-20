@@ -86,7 +86,7 @@ function PetStage({ pet, state }: { pet?: PetInfo; state: string }) {
     const rows = pet?.rows || 9;
     const row = rows >= 9 ? (STATE_ROWS[state] ?? 0) : 0;
     const frames = Math.max(1, pet?.frames?.[state] || pet?.frames?.idle || 6);
-    return { row, frames, cw: pet?.cellWidth || 192, ch: pet?.cellHeight || 208, url: pet?.spriteUrl || '/api/v1/pets/yinyue-2/sprite.png', width: pet?.width || 1536, height: pet?.height || 1872 };
+    return { row, frames, cw: pet?.cellWidth || 192, ch: pet?.cellHeight || 208, url: pet?.spriteUrl || '/assets/pets/yinyue-2.png', width: pet?.width || 1536, height: pet?.height || 1872 };
   }, [pet, state]);
   useEffect(() => {
     setFrame(0);
@@ -116,7 +116,7 @@ function App() {
   useEffect(() => { applySkin(experience?.skin); }, [experience?.skin]);
 
   useEffect(() => {
-    const refresh = () => api.experience().then(setExperience).catch(() => {});
+    const refresh = () => api.presentation().then(setExperience).catch(() => {});
     refresh();
     const interval = window.setInterval(refresh, 1000);
     return () => window.clearInterval(interval);

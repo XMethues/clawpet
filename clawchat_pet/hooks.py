@@ -1,26 +1,27 @@
-"""Hermes hooks that deliver normalized activity to the owned pet server."""
+"""Hermes hook adapter for the in-process clawchat-pet runtime."""
 from __future__ import annotations
 
 import json
 import os
 import sys
 import time
-import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime import ClawchatPetRuntime
+
 
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 LOG_FILE = HERMES_HOME / "clawchat-pet" / "plugin.log"
-SERVER_URL = os.environ.get("CLAWCHAT_PET_SERVER_URL", "http://127.0.0.1:54321")
-POST_TIMEOUT = float(os.environ.get("CLAWCHAT_PET_HOOK_TIMEOUT", "0.2"))
 _SEQ = 0
 
 
-def _log(msg: str) -> None:
+def _log(message: str) -> None:
     global _SEQ
     _SEQ += 1
-    line = f"[clawchat-pet #{_SEQ} {time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    line = f"[clawchat-pet #{_SEQ} {time.strftime('%Y-%m-%d %H:%M:%S')}] {message}"
     print(line, file=sys.stderr, flush=True)
     try:
         LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -30,31 +31,18 @@ def _log(msg: str) -> None:
         pass
 
 
-def _post_event(payload: dict[str, Any], server_url: str) -> bool:
-    try:
-        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        request = urllib.request.Request(
-            server_url.rstrip("/") + "/api/v1/events",
-            data=body,
-            headers={"Content-Type": "application/json; charset=utf-8"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=POST_TIMEOUT) as response:
-            return 200 <= int(response.status) < 300
-    except Exception:
-        return False
-
-
-def _emit(server_url: str, kind: str, payload: dict[str, Any]) -> None:
-    envelope = {
+def _emit(runtime: "ClawchatPetRuntime", kind: str, payload: dict[str, Any]) -> None:
+    event = {
         "schema_version": 1,
         "event_id": uuid.uuid4().hex,
         "occurred_at": time.time(),
         "kind": kind,
         "payload": payload,
     }
-    if not _post_event(envelope, server_url):
-        _log(f"{kind} dropped: server unavailable")
+    try:
+        runtime.handle_activity(event)
+    except Exception as exc:
+        _log(f"{kind} dropped: {exc}")
 
 
 def _identifier(kwargs: dict[str, Any], *names: str, fallback: str) -> str:
@@ -88,15 +76,16 @@ def _tool_outcome(result: Any) -> str:
     return "unknown"
 
 
-def register_hooks(ctx, server_url: str | None = None) -> None:
-    endpoint = server_url or SERVER_URL
+def register_hooks(ctx, runtime: "ClawchatPetRuntime") -> None:
     pending_tool_ids: dict[str, list[str]] = {}
     pending_approval_ids: list[str] = []
     pending_turn_ids: list[str] = []
     pending_subagent_ids: list[str] = []
     active_tools: list[tuple[str, str]] = []
 
-    def start_id(kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]) -> str:
+    def start_id(
+        kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]
+    ) -> str:
         provided = next((
             kwargs.get(name) for name in names if kwargs.get(name) not in (None, "")
         ), None)
@@ -106,7 +95,9 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
         pending.append(generated)
         return generated
 
-    def finish_id(kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]) -> str:
+    def finish_id(
+        kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]
+    ) -> str:
         provided = next((
             kwargs.get(name) for name in names if kwargs.get(name) not in (None, "")
         ), None)
@@ -116,40 +107,43 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
 
     def pre_tool_call(**kwargs):
         tool = str(kwargs.get("tool_name") or kwargs.get("function_name") or "").strip()
-        if tool:
-            provided = next((kwargs.get(name) for name in (
-                "tool_call_id", "call_id", "activity_id", "id"
-            ) if kwargs.get(name) not in (None, "")), None)
-            activity_id = str(provided) if provided is not None else uuid.uuid4().hex
-            if provided is None:
-                pending_tool_ids.setdefault(tool, []).append(activity_id)
-            active_tools.append((activity_id, tool))
-            _emit(endpoint, "tool_started", {"activity_id": activity_id, "tool_name": tool})
+        if not tool:
+            return
+        provided = next((kwargs.get(name) for name in (
+            "tool_call_id", "call_id", "activity_id", "id"
+        ) if kwargs.get(name) not in (None, "")), None)
+        activity_id = str(provided) if provided is not None else uuid.uuid4().hex
+        if provided is None:
+            pending_tool_ids.setdefault(tool, []).append(activity_id)
+        active_tools.append((activity_id, tool))
+        _emit(runtime, "tool_started", {
+            "activity_id": activity_id, "tool_name": tool
+        })
 
     def post_tool_call(**kwargs):
         tool = str(kwargs.get("function_name") or kwargs.get("tool_name") or "").strip()
-        if tool:
-            provided = next((kwargs.get(name) for name in (
-                "tool_call_id", "call_id", "activity_id", "id"
-            ) if kwargs.get(name) not in (None, "")), None)
-            pending = pending_tool_ids.get(tool, [])
-            activity_id = str(provided) if provided is not None else (
-                pending.pop(0) if pending else uuid.uuid4().hex
-            )
-            active_tools[:] = [item for item in active_tools if item[0] != activity_id]
-            _emit(endpoint, "tool_completed", {
-                "activity_id": activity_id,
-                "tool_name": tool,
-                "outcome": _tool_outcome(kwargs.get("result")),
-            })
+        if not tool:
+            return
+        provided = next((kwargs.get(name) for name in (
+            "tool_call_id", "call_id", "activity_id", "id"
+        ) if kwargs.get(name) not in (None, "")), None)
+        pending = pending_tool_ids.get(tool, [])
+        activity_id = str(provided) if provided is not None else (
+            pending.pop(0) if pending else uuid.uuid4().hex
+        )
+        active_tools[:] = [item for item in active_tools if item[0] != activity_id]
+        _emit(runtime, "tool_completed", {
+            "activity_id": activity_id,
+            "tool_name": tool,
+            "outcome": _tool_outcome(kwargs.get("result")),
+        })
 
     def pre_approval_request(**kwargs):
         activity_id = start_id(
             kwargs, ("approval_id", "request_id", "activity_id", "id"),
             pending_approval_ids,
         )
-        surface = str(kwargs.get("surface") or "cli").strip().lower()
-        mode = "smart" if surface == "smart" else "human"
+        mode = "smart" if str(kwargs.get("surface") or "cli").lower() == "smart" else "human"
         tool_activity_id = _identifier(
             kwargs, "tool_activity_id", "tool_call_id", "call_id", fallback=""
         )
@@ -158,7 +152,7 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
         payload = {"activity_id": activity_id, "mode": mode}
         if tool_activity_id:
             payload["tool_activity_id"] = tool_activity_id
-        _emit(endpoint, "approval_requested", payload)
+        _emit(runtime, "approval_requested", payload)
 
     def post_approval_response(**kwargs):
         activity_id = finish_id(
@@ -176,37 +170,34 @@ def register_hooks(ctx, server_url: str | None = None) -> None:
         )
         if tool_activity_id:
             payload["tool_activity_id"] = tool_activity_id
-        _emit(endpoint, "approval_resolved", payload)
+        _emit(runtime, "approval_resolved", payload)
 
     def pre_llm_call(**kwargs):
-        activity_id = start_id(
-            kwargs, ("session_id", "turn_id", "activity_id", "id"),
-            pending_turn_ids,
-        )
-        _emit(endpoint, "turn_started", {"activity_id": activity_id})
+        _emit(runtime, "turn_started", {"activity_id": start_id(
+            kwargs, ("session_id", "turn_id", "activity_id", "id"), pending_turn_ids
+        )})
 
     def on_session_end(**kwargs):
-        activity_id = finish_id(
-            kwargs, ("session_id", "turn_id", "activity_id", "id"),
-            pending_turn_ids,
-        )
-        outcome = "interrupted" if kwargs.get("interrupted") else str(kwargs.get("outcome") or "completed")
-        _emit(endpoint, "turn_ended", {"activity_id": activity_id, "outcome": outcome})
+        _emit(runtime, "turn_ended", {
+            "activity_id": finish_id(
+                kwargs, ("session_id", "turn_id", "activity_id", "id"), pending_turn_ids
+            ),
+            "outcome": "interrupted" if kwargs.get("interrupted") else str(
+                kwargs.get("outcome") or "completed"
+            ),
+        })
 
     def subagent_start(**kwargs):
-        activity_id = start_id(
-            kwargs, ("subagent_id", "agent_id", "activity_id", "id"),
-            pending_subagent_ids,
-        )
-        _emit(endpoint, "subagent_started", {"activity_id": activity_id})
+        _emit(runtime, "subagent_started", {"activity_id": start_id(
+            kwargs, ("subagent_id", "agent_id", "activity_id", "id"), pending_subagent_ids
+        )})
 
     def subagent_stop(**kwargs):
-        activity_id = finish_id(
-            kwargs, ("subagent_id", "agent_id", "activity_id", "id"),
-            pending_subagent_ids,
-        )
-        _emit(endpoint, "subagent_stopped", {
-            "activity_id": activity_id,
+        _emit(runtime, "subagent_stopped", {
+            "activity_id": finish_id(
+                kwargs, ("subagent_id", "agent_id", "activity_id", "id"),
+                pending_subagent_ids,
+            ),
             "outcome": str(kwargs.get("outcome") or "completed"),
         })
 

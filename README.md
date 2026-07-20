@@ -22,24 +22,21 @@ When Hermes loads the plugin, it ensures that:
 2. The Liveware tunnel agent is running
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
-Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hook delivery uses the versioned `POST /api/v1/events` endpoint; failed delivery is logged and dropped without replay.
-
-Growth remains in `cultivation.json` for compatibility. The selected gameplay scene is stored separately in `presentation.json`, so changing scenes never rewrites or replays growth.
+One authoritative runtime owns `save.json`, its lock, and atomic commits. Shared growth, current pet, per-pet personalities, current scene/skin, and per-skin visual overrides live in that one save. Petdex sprite/index files are cache, not product state. Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hermes hooks call the runtime directly in-process.
 
 ## Gameplay scenes
 
-The generic frontend reads one projected experience view:
+The display-only frontend reads one projected presentation. The bundled skill performs changes through the catalog and command interface:
 
 ```text
-GET  /api/v1/experience
-GET  /api/v1/scenes
-GET  /api/v1/scenes/current
-POST /api/v1/scenes/current   {"id":"star-voyage"}
+GET  /presentation
+GET  /catalog
+POST /command   {"type":"select_scene","scene_id":"star-voyage"}
 ```
 
-`xianxia` is the default scene and `star-voyage` is the second built-in adapter. Existing `/cultivation`, `/state`, and `/voice` routes remain available as compatibility interfaces.
+`xianxia` is the default scene and `star-voyage` is the second built-in adapter. A scene owns multiple compatible skins and one default skin. A skin changes only visual tokens; user overrides are stored against that skin. Selecting a scene also selects its default skin.
 
-To add a built-in scene, define another `SceneDefinition` in `clawchat_pet/gameplay.py` and register it in the default `GameplayScenes` tuple. A scene supplies all stage, meter, strategy, activity, voice, capability, asset, and chronicle labels for the fixed shared-growth slots. It must not receive a settlement callback or return progress deltas; gameplay formulas remain exclusively in `simulator.py`. Add the new adapter together with projection tests that compare its meter values and stage index against `xianxia` for the same saved progress.
+To add a built-in scene, define another `SceneDefinition` in `clawchat_pet/gameplay.py`, register it in `GameplayScenes`, and add at least one matching skin in `clawchat_pet/skins.py`. A scene supplies stage, meter, strategy, activity, voice, capability, asset, and chronicle labels for fixed shared-growth slots. It cannot settle progress. `PetPresentation` validates the scene/skin relationship and produces the single read model.
 
 ## Python environment
 

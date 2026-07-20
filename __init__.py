@@ -89,8 +89,9 @@ def _ensure_liveware_running() -> bool:
 
 def register(ctx) -> None:
     from clawchat_pet.hooks import register_hooks
+    from clawchat_pet.server import get_runtime
 
-    register_hooks(ctx)
+    register_hooks(ctx, get_runtime())
     _register_skill(ctx)
 
     # The plugin owns both parts of its runtime lifecycle: start the local PET

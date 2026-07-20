@@ -10,9 +10,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:54321',
-      '/state': 'http://127.0.0.1:54321',
-      '/cultivation': 'http://127.0.0.1:54321',
+      '/presentation': 'http://127.0.0.1:54321',
+      '/catalog': 'http://127.0.0.1:54321',
+      '/command': 'http://127.0.0.1:54321',
+      '/assets/pets': 'http://127.0.0.1:54321',
     }
   }
 });

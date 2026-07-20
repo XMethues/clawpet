@@ -1,36 +1,28 @@
 #!/usr/bin/env python3
-"""Cultivation simulator for clawchat-pet.
+"""Pure shared-growth rules for clawchat-pet.
 
-The simulator turns Hermes activity into a long-lived pet/cultivation save:
+The rules turn interpreted Hermes activity into caller-owned growth state:
 - realm progression: 炼气九层 → 筑基 → 金丹 → 元婴 → 化神门槛 → 雷劫试炼 → 元神试炼 → 化神
 - event-driven stats from Hermes hook events
-- pet personality / voice bubble text for the liveware UI
+- scene-neutral facts for later presentation
 """
 from __future__ import annotations
 
 import copy
-import json
-import os
 import random
-import threading
 import time
-from pathlib import Path
 from typing import Any
-
-HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
-DATA_DIR = HERMES_HOME / "clawchat-pet"
-SAVE_DIR = DATA_DIR
-SAVE_FILE = SAVE_DIR / "cultivation.json"
-LEGACY_SAVE_FILE = HERMES_HOME / "cultivation" / "yinyue.json"
 
 WINDOW_SIZE = 30
 LOG_SIZE = 140
-TICK_SECONDS = 1.0
-_SAVE_LOCK = threading.RLock()
-REVIEW_AFTER = 3.0
-IDLE_AFTER = 8.0
 
 POLICY_NAMES = ("入定", "冲关", "淬心", "悟道", "调息")
+STRATEGY_ID_BY_POLICY = dict(zip(
+    POLICY_NAMES, ("balanced", "advance", "stabilize", "learn", "recover")
+))
+POLICY_BY_STRATEGY_ID = {
+    strategy_id: policy for policy, strategy_id in STRATEGY_ID_BY_POLICY.items()
+}
 POLICY_PROFILES: dict[str, dict[str, float | str]] = {
     "入定": {
         "label": "入定", "qi_w": 1.0, "review_qi_w": 1.0, "compr_w": 1.0,
@@ -59,16 +51,6 @@ POLICY_PROFILES: dict[str, dict[str, float | str]] = {
     },
 }
 DEFAULT_POLICY = "入定"
-
-CULT_ACTIONS = {
-    "idle": "入定吐纳",
-    "review": "推演天机",
-    "run": "御剑历练",
-    "wave": "收束因果",
-    "failed": "心魔侵扰",
-    "waiting": "静候法旨",
-    "jump": "灵光乍现",
-}
 
 TECHNIQUE_BY_TOOL = {
     "terminal": "御剑诀",
@@ -119,21 +101,6 @@ def _tool_label(tool: str) -> str:
     if not tool:
         return ""
     return TECHNIQUE_BY_TOOL.get(tool, "无名术法")
-
-
-def _sanitize_log_text(typ: str, text: str) -> str:
-    """Translate raw tool names in old saved tool-event logs for display."""
-    if typ not in {"tool_success", "tool_failed"} or "：" not in text:
-        return text
-    prefix, rest = text.split("：", 1)
-    if "，" not in rest:
-        return text
-    raw_tool, suffix = rest.split("，", 1)
-    if raw_tool in TECHNIQUE_BY_TOOL:
-        return f"{prefix}：{_tool_label(raw_tool)}，{suffix}"
-    if raw_tool.replace("_", "").isalnum() and raw_tool.isascii():
-        return f"{prefix}：无名术法，{suffix}"
-    return text
 
 
 # Ordered realm graph. 化神 no longer hard-stops at the gate:
@@ -215,35 +182,12 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _atomic_write(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
-
-
-def _read_json(path: Path) -> dict[str, Any] | None:
-    try:
-        if not path.exists():
-            return None
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-
-
 def _realm_def(save: dict[str, Any]) -> dict[str, Any]:
-    key = save.get("realm", {}).get("key")
-    if key in REALM_BY_KEY:
+    key = str(save.get("realm", {}).get("key") or "")
+    try:
         return REALM_BY_KEY[key]
-    # Migrate older saves that only had major/minor.
-    major = save.get("realm", {}).get("major", "炼气")
-    minor = int(save.get("realm", {}).get("minor", 1) or 1)
-    if major == "炼气":
-        return REALM_BY_KEY.get(f"lianqi-{_clamp(minor, 1, 9):.0f}", REALM_PATH[0])
-    for r in REALM_PATH:
-        if r["major"] == major and int(r.get("minor", -1)) == minor:
-            return r
-    return REALM_PATH[0]
+    except KeyError:
+        raise ValueError(f"unknown realm key in save: {key!r}") from None
 
 
 def _realm_index(key: str) -> int:
@@ -269,11 +213,10 @@ def _sync_realm_fields(save: dict[str, Any]) -> None:
     stats["max_qi"] = rdef["max_qi"]
 
 
-def default_save() -> dict[str, Any]:
-    ts = _now()
+def default_save(now: float | None = None) -> dict[str, Any]:
+    ts = _now() if now is None else float(now)
     return {
-        "version": 2,
-        "profile": {"name": "宠物", "pet_id": "yinyue-2", "created_at": ts, "last_active": ts},
+        "profile": {"created_at": ts, "last_active": ts},
         "policy": {"name": DEFAULT_POLICY, "label": DEFAULT_POLICY, "set_at": ts, "source": "default", "day": _policy_day(ts), "daily_switches": 0},
         "realm": {
             "key": "lianqi-1", "major": "炼气", "minor": 1, "phase": "稳定修行",
@@ -288,7 +231,6 @@ def default_save() -> dict[str, Any]:
         "progress": {"next_breakthrough": {}},
         "techniques": {},
         "artifacts": {},
-        "state": {"action": "入定吐纳", "current_event": "idle", "current_tool": "", "started_at": ts},
         "voice": {"speaker": "宠物", "mood": "calm", "text": "我在。灵息很稳。", "ts": ts, "event": "idle"},
         "breakthrough": {"quality_candidate": None, "last_attempt_at": None},
         "dormancy": {"idle_days": 0.0, "phase": "active", "label": "活跃", "last_applied_stage": 0},
@@ -303,21 +245,16 @@ def default_save() -> dict[str, Any]:
     }
 
 
-def _merge_defaults(base: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
-    for k, v in base.items():
-        if k not in data:
-            data[k] = copy.deepcopy(v)
-        elif isinstance(v, dict) and isinstance(data[k], dict):
-            _merge_defaults(v, data[k])
-    return data
-
-
 def _policy_day(ts: float | None = None) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts or _now()))
+    return time.strftime(
+        "%Y-%m-%d", time.localtime(_now() if ts is None else float(ts))
+    )
 
 
-def _normalize_policy(save: dict[str, Any]) -> dict[str, Any]:
-    now = _now()
+def _normalize_policy(
+    save: dict[str, Any], now: float | None = None
+) -> dict[str, Any]:
+    now = _now() if now is None else float(now)
     policy = save.setdefault("policy", {})
     name = str(policy.get("name") or DEFAULT_POLICY)
     if name not in POLICY_PROFILES:
@@ -334,28 +271,26 @@ def _normalize_policy(save: dict[str, Any]) -> dict[str, Any]:
     return policy
 
 
-def _policy_profile(save: dict[str, Any]) -> dict[str, float | str]:
-    policy = _normalize_policy(save)
+def _policy_profile(
+    save: dict[str, Any], now: float | None = None
+) -> dict[str, float | str]:
+    policy = _normalize_policy(save, now)
     return POLICY_PROFILES.get(str(policy.get("name") or DEFAULT_POLICY), POLICY_PROFILES[DEFAULT_POLICY])
 
 
-def _pw(save: dict[str, Any], key: str, default: float = 1.0) -> float:
+def _pw(
+    save: dict[str, Any], key: str, default: float = 1.0, *, now: float | None = None
+) -> float:
     try:
-        return float(_policy_profile(save).get(key, default))
+        return float(_policy_profile(save, now).get(key, default))
     except Exception:
         return default
 
 
-def get_policy() -> dict[str, Any]:
-    with _SAVE_LOCK:
-        save = load_save()
-        policy = policy_state(save)
-        _atomic_write(SAVE_FILE, save)
-        return policy
-
-
-def policy_state(save: dict[str, Any]) -> dict[str, Any]:
-    policy = copy.deepcopy(_normalize_policy(save))
+def policy_state(
+    save: dict[str, Any], now: float | None = None
+) -> dict[str, Any]:
+    policy = copy.deepcopy(_normalize_policy(save, now))
     policy["available"] = list(POLICY_NAMES)
     policy["profile"] = copy.deepcopy(
         POLICY_PROFILES.get(str(policy.get("name")), POLICY_PROFILES[DEFAULT_POLICY])
@@ -363,75 +298,33 @@ def policy_state(save: dict[str, Any]) -> dict[str, Any]:
     return policy
 
 
-def apply_policy(save: dict[str, Any], name: str, source: str = "plugin") -> dict[str, Any]:
+def apply_policy(
+    save: dict[str, Any],
+    name: str,
+    source: str = "plugin",
+    *,
+    now: float | None = None,
+) -> dict[str, Any]:
+    now = _now() if now is None else float(now)
     name = str(name or "").strip()
     if name not in POLICY_PROFILES:
         raise ValueError(f"unknown policy: {name}; expected one of {', '.join(POLICY_NAMES)}")
-    policy = _normalize_policy(save)
-    today = _policy_day()
+    policy = _normalize_policy(save, now)
+    today = _policy_day(now)
     if policy.get("day") != today:
         policy["day"] = today
         policy["daily_switches"] = 0
     changed = policy.get("name") != name
     if changed:
         policy["daily_switches"] = int(policy.get("daily_switches", 0) or 0) + 1
-    policy.update({"name": name, "label": name, "set_at": _now(), "source": source or "plugin", "day": today})
-    _log(save, "policy", f"今日修炼方针改为{name}。", {"policy": name})
-    _set_voice(save, "policy", text=f"今日按{name}行事。")
+    policy.update({"name": name, "label": name, "set_at": now, "source": source or "plugin", "day": today})
+    _log(save, "policy", f"今日修炼方针改为{name}。", {"policy": name}, now=now)
+    _set_voice(save, "policy", text=f"今日按{name}行事。", now=now)
     _apply_ranges(save)
     update_progress(save)
-    out = policy_state(save)
+    out = policy_state(save, now)
     out["changed"] = bool(changed)
     return out
-
-
-def set_policy(name: str, source: str = "plugin") -> dict[str, Any]:
-    with _SAVE_LOCK:
-        save = load_save()
-        out = apply_policy(save, name, source)
-        _atomic_write(SAVE_FILE, save)
-        return out
-
-
-def load_save() -> dict[str, Any]:
-    data = _read_json(SAVE_FILE)
-    if not data and LEGACY_SAVE_FILE.exists():
-        data = _read_json(LEGACY_SAVE_FILE)
-    if not data:
-        data = default_save()
-    else:
-        data = _merge_defaults(default_save(), data)
-        data["version"] = 2
-    _sync_realm_fields(data)
-    _normalize_policy(data)
-    update_progress(data)
-    if not SAVE_FILE.exists():
-        _atomic_write(SAVE_FILE, data)
-    return data
-
-
-def _resolve_cult_state(raw: dict[str, Any]) -> dict[str, Any]:
-    data = dict(raw or {})
-    try:
-        age = _now() - float(data.get("ts", 0) or 0)
-    except Exception:
-        age = 999999.0
-    raw_state = str(data.get("state") or "idle")
-    if raw_state == "idle":
-        return data
-    if age > IDLE_AFTER:
-        data["state"] = "idle"
-        data["reason"] = f"auto-idle ({age:.1f}s)"
-        return data
-    if raw_state == "run" and age > REVIEW_AFTER:
-        data["state"] = "review"
-        data["reason"] = f"auto-review ({age:.1f}s)"
-        return data
-    if raw_state in ("wave", "failed", "review", "waiting", "jump") and age > REVIEW_AFTER:
-        data["state"] = "review"
-        data["reason"] = f"auto-review ({age:.1f}s)"
-        return data
-    return data
 
 
 def _tool_from_state(raw: dict[str, Any]) -> str:
@@ -449,32 +342,47 @@ def _log(
     typ: str,
     text: str,
     data: dict[str, Any] | None = None,
+    *,
+    now: float | None = None,
 ) -> None:
+    now = _now() if now is None else float(now)
     logs = save.setdefault("event_log", [])
     if (
         logs
         and logs[-1].get("type") == typ
         and logs[-1].get("text") == text
         and (logs[-1].get("data") or {}) == (data or {})
-        and _now() - float(logs[-1].get("ts", 0)) < 3
+        and now - float(logs[-1].get("ts", 0)) < 3
     ):
         return
-    event = {"ts": _now(), "type": typ, "text": text}
+    event = {"ts": now, "type": typ, "text": text}
     if data:
         event["data"] = copy.deepcopy(data)
     logs.append(event)
     del logs[:-LOG_SIZE]
 
 
-def _recent(save: dict[str, Any], typ: str, tool: str = "") -> None:
+def _recent(
+    save: dict[str, Any], typ: str, tool: str = "", *, now: float | None = None
+) -> None:
     rw = save.setdefault("recent_window", {"size": WINDOW_SIZE, "events": []})
     evs = rw.setdefault("events", [])
-    evs.append({"ts": _now(), "type": typ, "tool": tool})
+    evs.append({
+        "ts": _now() if now is None else float(now), "type": typ, "tool": tool
+    })
     if len(evs) > int(rw.get("size", WINDOW_SIZE)):
         del evs[:-int(rw.get("size", WINDOW_SIZE))]
 
 
-def _set_voice(save: dict[str, Any], event: str, mood: str | None = None, text: str | None = None) -> None:
+def _set_voice(
+    save: dict[str, Any],
+    event: str,
+    mood: str | None = None,
+    text: str | None = None,
+    *,
+    now: float | None = None,
+) -> None:
+    now = _now() if now is None else float(now)
     realm = save.get("realm", {})
     if text is None:
         if realm.get("breakthrough_ready"):
@@ -487,12 +395,14 @@ def _set_voice(save: dict[str, Any], event: str, mood: str | None = None, text: 
                 event = "tribulation"
         pool = VOICE_LINES.get(event) or VOICE_LINES.get("idle", ["我在。"])
         # deterministic-ish per second/event, avoids flicker every poll
-        idx = int((_now() // 12) + len(save.get("event_log", []))) % len(pool)
+        idx = int((now // 12) + len(save.get("event_log", []))) % len(pool)
         text = pool[idx]
-    save["voice"] = {"speaker": save.get("profile", {}).get("name", "宠物"), "mood": mood or event, "text": text, "ts": _now(), "event": event}
+    save["voice"] = {"speaker": save.get("profile", {}).get("name", "宠物"), "mood": mood or event, "text": text, "ts": now, "event": event}
 
 
-def _bump_technique(save: dict[str, Any], tool: str, xp: float) -> None:
+def _bump_technique(
+    save: dict[str, Any], tool: str, xp: float, *, now: float | None = None
+) -> None:
     if not tool:
         return
     name = TECHNIQUE_BY_TOOL.get(tool, "杂学旁通")
@@ -507,10 +417,13 @@ def _bump_technique(save: dict[str, Any], tool: str, xp: float) -> None:
             "technique_up",
             f"{name} 小有所成，提升至 Lv.{t['level']}。",
             {"tool": tool, "level": t["level"]},
+            now=now,
         )
 
 
-def _bump_artifact(save: dict[str, Any], tool: str, xp: float) -> None:
+def _bump_artifact(
+    save: dict[str, Any], tool: str, xp: float, *, now: float | None = None
+) -> None:
     if not tool or tool not in ARTIFACT_BY_TOOL:
         return
     name, typ = ARTIFACT_BY_TOOL[tool]
@@ -529,6 +442,7 @@ def _bump_artifact(save: dict[str, Any], tool: str, xp: float) -> None:
             "artifact_up",
             f"{name} 受因果淬炼，提升至 Lv.{a['level']}。",
             {"tool": tool, "level": a["level"]},
+            now=now,
         )
 
 
@@ -545,22 +459,10 @@ def _apply_ranges(save: dict[str, Any]) -> None:
     s["tribulation_pressure"] = round(_clamp(float(s.get("tribulation_pressure", 0)), 0, 999), 2)
 
 
-def _passive_tick(save: dict[str, Any], raw_state: str, dt: float) -> None:
-    s = save["stats"]
-    if raw_state == "idle":
-        s["fatigue"] = float(s.get("fatigue", 0)) - 0.05 * dt * _pw(save, "idle_fatigue_recover_w")
-        s["heart_demon"] = float(s.get("heart_demon", 0)) - 0.012 * dt
-        s["qi"] = float(s.get("qi", 0)) + 0.015 * dt * _pw(save, "review_qi_w")
-    elif raw_state == "review":
-        s["qi"] = float(s.get("qi", 0)) + 0.03 * dt * _pw(save, "review_qi_w")
-        s["comprehension"] = float(s.get("comprehension", 0)) + 0.006 * dt * _pw(save, "compr_w")
-    elif raw_state == "waiting":
-        s["fatigue"] = float(s.get("fatigue", 0)) + 0.04 * dt
-    elif raw_state in ("run", "failed"):
-        s["fatigue"] = float(s.get("fatigue", 0)) + 0.035 * dt
-
-
-def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
+def apply_event(
+    save: dict[str, Any], raw: dict[str, Any], *, now: float | None = None
+) -> bool:
+    now = _now() if now is None else float(now)
     state = str(raw.get("state") or "idle")
     ts = float(raw.get("ts") or 0)
     internal = save.setdefault("internal", {})
@@ -573,97 +475,100 @@ def apply_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
     stats = save["stats"]
     counters = save["counters"]
     if state != "idle":
-        save["profile"]["last_active"] = _now()
+        save["profile"]["last_active"] = now
         internal["idle_decay_anchor"] = save["profile"]["last_active"]
         internal["idle_decay_applied_stage"] = 0
         save.setdefault("dormancy", {}).update({"idle_days": 0.0, "phase": "active", "label": "活跃", "last_applied_stage": 0})
-    save["state"] = {"action": CULT_ACTIONS.get(state, state), "current_event": state, "current_tool": tool, "started_at": ts or _now()}
-
     if state == "review":
-        stats["qi"] += 0.8 * _pw(save, "review_qi_w")
-        stats["comprehension"] += 0.25 * _pw(save, "compr_w")
+        stats["qi"] += 0.8 * _pw(save, "review_qi_w", now=now)
+        stats["comprehension"] += 0.25 * _pw(save, "compr_w", now=now)
         stats["fatigue"] += 0.12
         counters["long_review_count"] += 1
-        _recent(save, "review", tool)
-        _log(save, "review", "宠物观天机流转，推演片刻，悟性微增。", {"tool": tool})
+        _recent(save, "review", tool, now=now)
+        _log(save, "review", "宠物观天机流转，推演片刻，悟性微增。", {"tool": tool}, now=now)
     elif state == "run":
         stats["fatigue"] += 0.35
         stats["karma"] += 0.18
-        _bump_technique(save, tool, 0.4)
-        _recent(save, "tool_start", tool)
+        _bump_technique(save, tool, 0.4, now=now)
+        _recent(save, "tool_start", tool, now=now)
     elif state == "wave":
         counters["tool_success_total"] += 1
-        qi_gain = 2.4 * _pw(save, "qi_w")
+        qi_gain = 2.4 * _pw(save, "qi_w", now=now)
         stats["qi"] += qi_gain
-        stats["fatigue"] -= 0.35 * _pw(save, "wave_fatigue_recover_w")
+        stats["fatigue"] -= 0.35 * _pw(save, "wave_fatigue_recover_w", now=now)
         stats["fate"] += 0.05
         recovered = bool(internal.get("last_failure_open"))
         if recovered:
             counters["recovered_total"] += 1
             stats["dao_heart"] += 1.0
-            stats["heart_demon"] -= 3.0 * _pw(save, "recovery_demon_w")
-            _log(save, "recovered", "宠物斩去杂念，破除一缕心魔，道心 +1。", {"stability_gain": 1.0})
-        _bump_technique(save, tool, 2.4)
-        _bump_artifact(save, tool, 1.7)
-        _recent(save, "tool_success", tool)
+            stats["heart_demon"] -= 3.0 * _pw(save, "recovery_demon_w", now=now)
+            _log(save, "recovered", "宠物斩去杂念，破除一缕心魔，道心 +1。", {"stability_gain": 1.0}, now=now)
+        _bump_technique(save, tool, 2.4, now=now)
+        _bump_artifact(save, tool, 1.7, now=now)
+        _recent(save, "tool_success", tool, now=now)
         label = _tool_label(tool)
         _log(
             save,
             "tool_success",
             f"历练功成{('：' + label) if label else ''}，灵气 +{qi_gain:.1f}。",
             {"tool": tool, "primary_gain": qi_gain},
+            now=now,
         )
         internal["last_failure_open"] = False
     elif state == "failed":
         counters["tool_failed_total"] += 1
-        stats["heart_demon"] += 4.5 * _pw(save, "fail_demon_w")
-        stats["fatigue"] += 1.4 * _pw(save, "fail_fatigue_w")
+        stats["heart_demon"] += 4.5 * _pw(save, "fail_demon_w", now=now)
+        stats["fatigue"] += 1.4 * _pw(save, "fail_fatigue_w", now=now)
         stats["tribulation_pressure"] += 0.6
-        _recent(save, "tool_failed", tool)
+        _recent(save, "tool_failed", tool, now=now)
         label = _tool_label(tool)
         _log(
             save,
             "tool_failed",
             f"因果反噬{('：' + label) if label else ''}，心魔滋生。",
             {"tool": tool},
+            now=now,
         )
         internal["last_failure_open"] = True
     elif state == "waiting":
         counters["waiting_total"] += 1
         stats["fatigue"] += 0.1
         stats["dao_heart"] += 0.03
-        _recent(save, "waiting", tool)
-        _log(save, "waiting", "法旨未至，宠物收剑静候。", {"tool": tool})
+        _recent(save, "waiting", tool, now=now)
+        _log(save, "waiting", "法旨未至，宠物收剑静候。", {"tool": tool}, now=now)
     elif state == "jump":
-        stats["qi"] += 1.2 * _pw(save, "qi_w")
+        stats["qi"] += 1.2 * _pw(save, "qi_w", now=now)
         stats["fate"] += 0.2
-        stats["comprehension"] += 0.2 * _pw(save, "compr_w")
-        _recent(save, "insight", tool)
-        _log(save, "insight", "灵光乍现，宠物似有所悟。", {"tool": tool})
+        stats["comprehension"] += 0.2 * _pw(save, "compr_w", now=now)
+        _recent(save, "insight", tool, now=now)
+        _log(save, "insight", "灵光乍现，宠物似有所悟。", {"tool": tool}, now=now)
     elif state == "idle":
-        _recent(save, "idle", tool)
+        _recent(save, "idle", tool, now=now)
 
     if success is False and state != "failed":
-        stats["heart_demon"] += 2.0 * _pw(save, "fail_demon_w")
+        stats["heart_demon"] += 2.0 * _pw(save, "fail_demon_w", now=now)
         internal["last_failure_open"] = True
 
-    try_resolve_tribulation(save, state)
+    try_resolve_tribulation(save, state, now=now)
     if event_id:
         processed_ids.append(event_id)
-    internal["last_processed_ts"] = ts or _now()
+    internal["last_processed_ts"] = ts or now
     internal["last_event_type"] = state
     if save.get("voice", {}).get("event") not in {"breakthrough_pass", "breakthrough_fail"}:
-        _set_voice(save, state)
+        _set_voice(save, state, now=now)
     return True
 
 
-def apply_cultivation_event(save: dict[str, Any], raw: dict[str, Any]) -> bool:
+def apply_cultivation_event(
+    save: dict[str, Any], raw: dict[str, Any], *, now: float | None = None
+) -> bool:
     """Apply one durable event and all cultivation invariants around it."""
-    apply_idle_decay(save)
-    if not apply_event(save, raw):
+    now = _now() if now is None else float(now)
+    apply_idle_decay(save, now)
+    if not apply_event(save, raw, now=now):
         return False
     _apply_ranges(save)
-    check_breakthrough(save)
+    check_breakthrough(save, now=now)
     _apply_ranges(save)
     update_progress(save)
     return True
@@ -701,7 +606,9 @@ def update_progress(save: dict[str, Any]) -> None:
     }
 
 
-def try_resolve_tribulation(save: dict[str, Any], trigger: str) -> bool:
+def try_resolve_tribulation(
+    save: dict[str, Any], trigger: str, *, now: float | None = None
+) -> bool:
     """Resolve 化神 trial stages only when Hermes produces a success/insight event."""
     _sync_realm_fields(save)
     rdef = _realm_def(save)
@@ -709,7 +616,7 @@ def try_resolve_tribulation(save: dict[str, Any], trigger: str) -> bool:
         return False
     update_progress(save)
     if not save["realm"].get("breakthrough_ready"):
-        _set_voice(save, "tribulation")
+        _set_voice(save, "tribulation", now=now)
         return False
     stats = save["stats"]
     idx = _realm_index(rdef["key"])
@@ -724,15 +631,21 @@ def try_resolve_tribulation(save: dict[str, Any], trigger: str) -> bool:
     stats["comprehension"] += 1.2
     stats["tribulation_pressure"] = max(0.0, float(stats.get("tribulation_pressure", 0)) - 4.0)
     save["counters"]["breakthrough_success_total"] += 1
-    save["counters"]["last_breakthrough_at"] = _now()
+    save["counters"]["last_breakthrough_at"] = _now() if now is None else float(now)
     save["breakthrough"]["quality_candidate"] = round(score, 1)
     _log(
         save,
         "tribulation_pass",
         f"{rdef['label']}应劫而过，宠物进入{save['realm']['label']}。",
         {"stage_index": save["realm"]["path_index"]},
+        now=now,
     )
-    _set_voice(save, "breakthrough_pass", text=f"{rdef['label']}已过。现在是{save['realm']['label']}。")
+    _set_voice(
+        save,
+        "breakthrough_pass",
+        text=f"{rdef['label']}已过。现在是{save['realm']['label']}。",
+        now=now,
+    )
     update_progress(save)
     return True
 
@@ -754,30 +667,32 @@ def _idle_phase(days: float) -> tuple[int, str, str]:
     return 0, "active", "活跃"
 
 
-def _apply_idle_stage(save: dict[str, Any], stage: int) -> None:
+def _apply_idle_stage(
+    save: dict[str, Any], stage: int, *, now: float | None = None
+) -> None:
     """Apply one 1-2-3-4-5 day dormancy milestone once per idle streak."""
     stats = save["stats"]
-    decay_w = _pw(save, "idle_decay_w")
-    recover_w = _pw(save, "idle_fatigue_recover_w")
+    decay_w = _pw(save, "idle_decay_w", now=now)
+    recover_w = _pw(save, "idle_fatigue_recover_w", now=now)
     if stage == 1:
         stats["qi"] = float(stats.get("qi", 0)) * max(0.0, 1.0 - 0.04 * decay_w)
         stats["fatigue"] = max(0.0, float(stats.get("fatigue", 0)) - 8.0 * recover_w)
-        _log(save, "idle_decay", "一日未动，气机轻微散逸，疲劳渐消。")
+        _log(save, "idle_decay", "一日未动，气机轻微散逸，疲劳渐消。", now=now)
     elif stage == 2:
         stats["qi"] = float(stats.get("qi", 0)) * max(0.0, 1.0 - 0.07 * decay_w)
         stats["heart_demon"] = float(stats.get("heart_demon", 0)) + 1.5 * decay_w
         stats["dao_heart"] = max(0.0, float(stats.get("dao_heart", 0)) - 0.15 * decay_w)
-        _log(save, "idle_decay", "二日未动，心魔微起，道心略浮。")
+        _log(save, "idle_decay", "二日未动，心魔微起，道心略浮。", now=now)
     elif stage == 3:
         stats["qi"] = float(stats.get("qi", 0)) * max(0.0, 1.0 - 0.12 * decay_w)
         stats["dao_heart"] = max(0.0, float(stats.get("dao_heart", 0)) - 0.35 * decay_w)
         stats["heart_demon"] = float(stats.get("heart_demon", 0)) + 2.0 * decay_w
-        _log(save, "idle_decay", "三日未动，道基松动，需重新温养。")
+        _log(save, "idle_decay", "三日未动，道基松动，需重新温养。", now=now)
     elif stage == 4:
         stats["qi"] = float(stats.get("qi", 0)) * max(0.0, 1.0 - 0.22 * decay_w)
-        stats["comprehension"] = max(0.0, float(stats.get("comprehension", 0)) - 0.25 * decay_w / max(0.1, _pw(save, "compr_w")))
+        stats["comprehension"] = max(0.0, float(stats.get("comprehension", 0)) - 0.25 * decay_w / max(0.1, _pw(save, "compr_w", now=now)))
         stats["heart_demon"] = float(stats.get("heart_demon", 0)) + 3.0 * decay_w
-        _log(save, "idle_decay", "四日未动，灵气散逸加重。")
+        _log(save, "idle_decay", "四日未动，灵气散逸加重。", now=now)
     elif stage >= 5:
         stats["qi"] = float(stats.get("qi", 0)) * max(0.0, 1.0 - 0.30 * decay_w)
         stats["heart_demon"] = float(stats.get("heart_demon", 0)) + 4.0 * decay_w
@@ -794,16 +709,17 @@ def _apply_idle_stage(save: dict[str, Any], stage: int) -> None:
             _sync_realm_fields(save)
             stats["heart_demon"] = max(0.0, float(stats.get("heart_demon", 0)) - 20.0)
             stats["qi"] = min(float(stats.get("qi", 0)), float(stats.get("max_qi", 30)) * 0.30)
-            save["counters"]["last_regression_ts"] = _now()
+            save["counters"]["last_regression_ts"] = _now() if now is None else float(now)
             _log(
                 save,
                 "idle_regression",
                 f"五日未温养，道基浮动，境界跌落至{save['realm']['label']}。",
                 {"stage_index": save["realm"]["path_index"]},
+                now=now,
             )
-            _set_voice(save, "idle_regression")
+            _set_voice(save, "idle_regression", now=now)
         else:
-            _log(save, "idle_decay", "五日未动，道基久未温养；状态尚可，未跌境。")
+            _log(save, "idle_decay", "五日未动，道基久未温养；状态尚可，未跌境。", now=now)
 
 
 def apply_idle_decay(save: dict[str, Any], now: float | None = None) -> None:
@@ -811,7 +727,7 @@ def apply_idle_decay(save: dict[str, Any], now: float | None = None) -> None:
 
     Milestones are applied once per idle streak, not every tick.
     """
-    now = now or _now()
+    now = _now() if now is None else float(now)
     profile = save.setdefault("profile", {})
     internal = save.setdefault("internal", {})
     dormancy = save.setdefault("dormancy", {})
@@ -827,10 +743,10 @@ def apply_idle_decay(save: dict[str, Any], now: float | None = None) -> None:
     applied = int(internal.get("idle_decay_applied_stage", 0) or 0)
     if stage > applied:
         for st in range(applied + 1, stage + 1):
-            _apply_idle_stage(save, st)
+            _apply_idle_stage(save, st, now=now)
         internal["idle_decay_applied_stage"] = stage
         if stage >= 1 and save.get("voice", {}).get("event") not in {"idle_regression"}:
-            _set_voice(save, "idle_decay")
+            _set_voice(save, "idle_decay", now=now)
 
     dormancy.update({
         "idle_days": round(idle_days, 3),
@@ -840,10 +756,27 @@ def apply_idle_decay(save: dict[str, Any], now: float | None = None) -> None:
     })
 
 
-def check_breakthrough(save: dict[str, Any]) -> None:
+def settle_time(save: dict[str, Any], now: float) -> bool:
+    """Settle durable time milestones on demand; return whether state changed."""
+    internal = save.setdefault("internal", {})
+    before = int(internal.get("idle_decay_applied_stage", 0) or 0)
+    last_active = float(save.setdefault("profile", {}).get("last_active", now) or now)
+    due, _phase, _label = _idle_phase(max(0.0, (now - last_active) / IDLE_DAY_SECONDS))
+    if due <= before:
+        return False
+    apply_idle_decay(save, now)
+    after = int(internal.get("idle_decay_applied_stage", 0) or 0)
+    if after == before:
+        return False
+    _apply_ranges(save)
+    update_progress(save)
+    return True
+
+
+def check_breakthrough(save: dict[str, Any], *, now: float | None = None) -> None:
     _sync_realm_fields(save)
     stats = save["stats"]
-    now = _now()
+    now = _now() if now is None else float(now)
     # Rare regression keeps heart-demon meaningful but not overly punitive.
     last_reg = float(save["counters"].get("last_regression_ts", 0) or 0)
     if stats["heart_demon"] > 130 and save["realm"].get("path_index", 0) > 0 and now - last_reg > 86400:
@@ -858,6 +791,7 @@ def check_breakthrough(save: dict[str, Any]) -> None:
             "regression",
             f"心魔过盛，境界跌落至{save['realm']['label']}。",
             {"stage_index": save["realm"]["path_index"]},
+            now=now,
         )
 
     update_progress(save)
@@ -865,7 +799,7 @@ def check_breakthrough(save: dict[str, Any]) -> None:
         return
     rdef = _realm_def(save)
     if rdef.get("kind") == "tribulation":
-        _set_voice(save, "tribulation")
+        _set_voice(save, "tribulation", now=now)
         return
     idx = _realm_index(rdef["key"])
     if idx >= len(REALM_PATH) - 1:
@@ -887,113 +821,12 @@ def check_breakthrough(save: dict[str, Any]) -> None:
         typ,
         f"气机圆满，宠物突破至{save['realm']['label']}。",
         {"stage_index": save["realm"]["path_index"]},
+        now=now,
     )
-    _set_voice(save, "jump", text=f"突破了。现在是{save['realm']['label']}。")
+    _set_voice(
+        save,
+        "jump",
+        text=f"突破了。现在是{save['realm']['label']}。",
+        now=now,
+    )
     update_progress(save)
-
-
-def tick_once() -> dict[str, Any]:
-    with _SAVE_LOCK:
-        save = load_save()
-        raw = {"state": "idle", "reason": "no activity", "ts": _now()}
-        now = _now()
-        last_tick = float(save.setdefault("internal", {}).get("last_tick_ts", now) or now)
-        dt = max(0.0, min(5.0, now - last_tick))
-        save["internal"]["last_tick_ts"] = now
-
-        apply_idle_decay(save, now)
-        _passive_tick(save, str(raw.get("state") or "idle"), dt)
-        apply_event(save, raw)
-        _apply_ranges(save)
-        check_breakthrough(save)
-        _apply_ranges(save)
-        if not save.get("voice") or now - float(save.get("voice", {}).get("ts", 0) or 0) > 15:
-            _set_voice(save, str(save.get("state", {}).get("current_event") or raw.get("state") or "idle"))
-        _atomic_write(SAVE_FILE, save)
-        return public_state(save)
-
-
-def public_state(save: dict[str, Any] | None = None) -> dict[str, Any]:
-    if save is None:
-        save = load_save()
-    data = copy.deepcopy(save)
-    data.pop("internal", None)
-
-    state = data.get("state", {})
-    if state.get("current_tool"):
-        state["current_tool"] = _tool_label(str(state["current_tool"]))
-
-    for event in data.get("recent_window", {}).get("events", []):
-        if event.get("tool"):
-            event["tool"] = _tool_label(str(event["tool"]))
-
-    for event in data.get("event_log", []):
-        event["text"] = _sanitize_log_text(
-            str(event.get("type") or ""),
-            str(event.get("text") or ""),
-        )
-    return data
-
-
-def get_voice() -> dict[str, Any]:
-    with _SAVE_LOCK:
-        save = load_save()
-        if not save.get("voice"):
-            _set_voice(save, str(save.get("state", {}).get("current_event") or "idle"))
-            _atomic_write(SAVE_FILE, save)
-        return copy.deepcopy(save.get("voice", {}))
-
-
-class CultivationRunner:
-    def __init__(self) -> None:
-        self.stop_event = threading.Event()
-        self.thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        if self.thread and self.thread.is_alive():
-            return
-        tick_once()
-        self.thread = threading.Thread(target=self._loop, name="cultivation-sim", daemon=True)
-        self.thread.start()
-
-    def stop(self) -> None:
-        self.stop_event.set()
-        if self.thread:
-            self.thread.join(timeout=2)
-
-    def _loop(self) -> None:
-        while not self.stop_event.is_set():
-            try:
-                tick_once()
-            except Exception as exc:
-                try:
-                    save = load_save()
-                    _log(save, "sim_error", f"模拟器遇到扰动：{exc}")
-                    _atomic_write(SAVE_FILE, save)
-                except Exception:
-                    pass
-            self.stop_event.wait(TICK_SECONDS)
-
-
-_runner = CultivationRunner()
-
-
-def start_background() -> CultivationRunner:
-    _runner.start()
-    return _runner
-
-
-def get_state() -> dict[str, Any]:
-    with _SAVE_LOCK:
-        return public_state(load_save())
-
-
-def get_log(limit: int = 50) -> dict[str, Any]:
-    with _SAVE_LOCK:
-        save = public_state(load_save())
-        logs = save.get("event_log", [])[-limit:]
-        return {"events": logs, "count": len(logs)}
-
-
-if __name__ == "__main__":
-    print(json.dumps(tick_once(), ensure_ascii=False, indent=2))
