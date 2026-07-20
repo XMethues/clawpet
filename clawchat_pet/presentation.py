@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .gameplay import DEFAULT_SCENE_ID, GameplayScenes
+from .growth import GrowthSnapshot
 from .skins import SkinCatalog
 
 
@@ -38,13 +39,13 @@ class PetPresentation:
     def project(
         self,
         selection: Mapping[str, Any],
-        cultivation: Mapping[str, Any],
+        growth: GrowthSnapshot,
         activity: Mapping[str, Any],
         pet: Mapping[str, Any],
         personality: Mapping[str, Any],
     ) -> dict[str, Any]:
         result = self._scenes.project(
-            str(selection["scene_id"]), cultivation, activity, pet, personality
+            str(selection["scene_id"]), growth, activity, pet, personality
         )
         skin_id = str(selection["skin_id"])
         override = (selection.get("skin_overrides") or {}).get(skin_id)

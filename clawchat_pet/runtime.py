@@ -14,9 +14,12 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from .activity import ActivityInterpreter
+from .growth import GrowthSnapshot, SharedGrowth
 from .pets import DEFAULT_PET_ID, PetModule
 from .presentation import PetPresentation
-from .simulator import POLICY_BY_STRATEGY_ID, apply_policy, default_save, settle_time
+
+
+SAVE_VERSION = 2
 
 
 class ClawchatPetRuntime:
@@ -41,16 +44,22 @@ class ClawchatPetRuntime:
         with self._lock:
             if not self.save_file.exists():
                 self._write(self._new_save())
+            else:
+                save = self._read()
+                try:
+                    self._growth(save)
+                except (TypeError, ValueError) as exc:
+                    raise self._unsupported_save() from exc
+
+    def _unsupported_save(self) -> RuntimeError:
+        return RuntimeError(
+            f"unsupported runtime save format: delete {self.save_file} and restart"
+        )
 
     def _new_save(self) -> dict[str, Any]:
-        now = float(self._clock())
-        cultivation = default_save(now)
-        cultivation["voice"]["ts"] = now
-        cultivation["event_log"][0]["ts"] = now
-        cultivation["internal"]["last_tick_ts"] = now
         return {
-            "version": 1,
-            "cultivation": cultivation,
+            "version": SAVE_VERSION,
+            "growth": SharedGrowth.fresh(clock=self._clock).serialize(),
             "pet": {"current": DEFAULT_PET_ID, "personalities": {}},
             "presentation": self._pet_presentation.new_selection(),
         }
@@ -62,13 +71,18 @@ class ClawchatPetRuntime:
             raise RuntimeError(f"cannot read runtime save: {self.save_file}") from exc
         if not isinstance(data, dict):
             raise RuntimeError(f"runtime save must contain an object: {self.save_file}")
+        if data.get("version") != SAVE_VERSION:
+            raise self._unsupported_save()
+        if not isinstance(data.get("growth"), Mapping):
+            raise RuntimeError(f"runtime save has no shared growth: {self.save_file}")
         return data
 
     def _write(self, data: Mapping[str, Any]) -> None:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         temporary = self.save_file.with_suffix(".json.tmp")
         temporary.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False),
+            encoding="utf-8",
         )
         os.replace(temporary, self.save_file)
 
@@ -78,36 +92,46 @@ class ClawchatPetRuntime:
     def _personality(self, save: Mapping[str, Any], slug: str) -> dict[str, Any]:
         return self._pets.personality(save.get("pet") or {}, slug)
 
+    def _growth(self, save: Mapping[str, Any]) -> SharedGrowth:
+        return SharedGrowth.load(save["growth"], clock=self._clock)
+
     def presentation(self) -> dict[str, Any]:
         with self._lock:
             save = self._read()
-            if settle_time(save["cultivation"], self._clock()):
+            growth = self._growth(save)
+            observed = growth.observe()
+            if growth.dirty:
+                save["growth"] = growth.serialize()
                 self._write(save)
-            return self._presentation(save)
+            return self._presentation(save, observed)
 
-    def _presentation(self, save: Mapping[str, Any]) -> dict[str, Any]:
+    def _presentation(
+        self, save: Mapping[str, Any], growth: GrowthSnapshot
+    ) -> dict[str, Any]:
         selection = save["presentation"]
         pet = self._current_pet(save)
         return self._pet_presentation.project(
             selection,
-            save["cultivation"],
+            growth,
             self._activity.state(),
             pet,
             self._personality(save, str(pet["slug"])),
         )
 
-    def handle_activity(self, event: Mapping[str, Any]) -> str:
+    def handle_activity(
+        self, callback_name: str, raw_kwargs: Mapping[str, Any]
+    ) -> str:
         with self._lock:
             save = self._read()
-            settled = settle_time(save["cultivation"], self._clock())
-            status = self._activity.handle(
-                event,
-                save["cultivation"],
-                lambda: self._write(save),
-            )
-            if status == "duplicate" and settled:
+            growth = self._growth(save)
+
+            def persist_growth() -> None:
+                save["growth"] = growth.serialize()
                 self._write(save)
-            return status
+
+            return self._activity.handle(
+                callback_name, raw_kwargs, growth, persist_growth
+            )
 
     def activity_state(self) -> dict[str, Any]:
         with self._lock:
@@ -131,7 +155,8 @@ class ClawchatPetRuntime:
         command_type = self._required_text(command, "type")
         with self._lock:
             save = self._read()
-            settle_time(save["cultivation"], self._clock())
+            growth = self._growth(save)
+            growth.observe()
             selection = save["presentation"]
             if self._pet_presentation.apply_command(
                 selection, command_type, command
@@ -157,22 +182,21 @@ class ClawchatPetRuntime:
                 )
             elif command_type == "select_strategy":
                 strategy_id = self._required_text(command, "strategy_id")
-                try:
-                    policy = POLICY_BY_STRATEGY_ID[strategy_id]
-                except KeyError:
-                    raise ValueError(f"unknown strategy: {strategy_id}") from None
-                apply_policy(
-                    save["cultivation"], policy, source="command", now=self._clock()
-                )
+                growth.select_strategy(strategy_id)
             else:
                 raise ValueError(f"unsupported command type: {command_type}")
+            observed = growth.observe()
+            save["growth"] = growth.serialize()
             self._write(save)
-            return self._presentation(save)
+            return self._presentation(save, observed)
 
     def catalog(self) -> dict[str, Any]:
         with self._lock:
             save = self._read()
-            if settle_time(save["cultivation"], self._clock()):
+            growth = self._growth(save)
+            growth.observe()
+            if growth.dirty:
+                save["growth"] = growth.serialize()
                 self._write(save)
             selection = save["presentation"]
             presentation_catalog = self._pet_presentation.catalog(selection)

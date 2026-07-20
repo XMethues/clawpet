@@ -1,13 +1,11 @@
-"""Hermes hook adapter for the in-process clawchat-pet runtime."""
+"""Thin Hermes hook adapter for the in-process clawchat-pet runtime."""
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .runtime import ClawchatPetRuntime
@@ -31,190 +29,40 @@ def _log(message: str) -> None:
         pass
 
 
-def _emit(runtime: "ClawchatPetRuntime", kind: str, payload: dict[str, Any]) -> None:
-    event = {
-        "schema_version": 1,
-        "event_id": uuid.uuid4().hex,
-        "occurred_at": time.time(),
-        "kind": kind,
-        "payload": payload,
-    }
+def _forward(
+    runtime: "ClawchatPetRuntime",
+    callback_name: str,
+    raw_kwargs: dict[str, Any],
+) -> None:
     try:
-        runtime.handle_activity(event)
+        runtime.handle_activity(callback_name, raw_kwargs)
     except Exception as exc:
-        _log(f"{kind} dropped: {exc}")
-
-
-def _identifier(kwargs: dict[str, Any], *names: str, fallback: str) -> str:
-    for name in names:
-        value = kwargs.get(name)
-        if value not in (None, ""):
-            return str(value)
-    return fallback
-
-
-def _tool_outcome(result: Any) -> str:
-    data = result
-    if isinstance(result, str):
-        try:
-            data = json.loads(result)
-        except Exception:
-            text = result.strip().lower()
-            if text.startswith(("error:", "exception:", "traceback")):
-                return "failure"
-            return "unknown"
-    if not isinstance(data, dict):
-        return "unknown"
-    if data.get("ok") is False or data.get("success") is False:
-        return "failure"
-    if data.get("exit_code") not in (None, 0):
-        return "failure"
-    if data.get("error") not in (None, "", False):
-        return "failure"
-    if data.get("ok") is True or data.get("success") is True or data.get("exit_code") == 0:
-        return "success"
-    return "unknown"
+        _log(f"{callback_name} dropped: {exc}")
 
 
 def register_hooks(ctx, runtime: "ClawchatPetRuntime") -> None:
-    pending_tool_ids: dict[str, list[str]] = {}
-    pending_approval_ids: list[str] = []
-    pending_turn_ids: list[str] = []
-    pending_subagent_ids: list[str] = []
-    active_tools: list[tuple[str, str]] = []
+    """Register adapters that forward each Hermes callback without interpretation."""
 
-    def start_id(
-        kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]
-    ) -> str:
-        provided = next((
-            kwargs.get(name) for name in names if kwargs.get(name) not in (None, "")
-        ), None)
-        if provided is not None:
-            return str(provided)
-        generated = uuid.uuid4().hex
-        pending.append(generated)
-        return generated
+    def adapter(callback_name: str):
+        def callback(**kwargs):
+            _forward(runtime, callback_name, kwargs)
 
-    def finish_id(
-        kwargs: dict[str, Any], names: tuple[str, ...], pending: list[str]
-    ) -> str:
-        provided = next((
-            kwargs.get(name) for name in names if kwargs.get(name) not in (None, "")
-        ), None)
-        if provided is not None:
-            return str(provided)
-        return pending.pop(0) if pending else uuid.uuid4().hex
+        return callback
 
-    def pre_tool_call(**kwargs):
-        tool = str(kwargs.get("tool_name") or kwargs.get("function_name") or "").strip()
-        if not tool:
-            return
-        provided = next((kwargs.get(name) for name in (
-            "tool_call_id", "call_id", "activity_id", "id"
-        ) if kwargs.get(name) not in (None, "")), None)
-        activity_id = str(provided) if provided is not None else uuid.uuid4().hex
-        if provided is None:
-            pending_tool_ids.setdefault(tool, []).append(activity_id)
-        active_tools.append((activity_id, tool))
-        _emit(runtime, "tool_started", {
-            "activity_id": activity_id, "tool_name": tool
-        })
-
-    def post_tool_call(**kwargs):
-        tool = str(kwargs.get("function_name") or kwargs.get("tool_name") or "").strip()
-        if not tool:
-            return
-        provided = next((kwargs.get(name) for name in (
-            "tool_call_id", "call_id", "activity_id", "id"
-        ) if kwargs.get(name) not in (None, "")), None)
-        pending = pending_tool_ids.get(tool, [])
-        activity_id = str(provided) if provided is not None else (
-            pending.pop(0) if pending else uuid.uuid4().hex
-        )
-        active_tools[:] = [item for item in active_tools if item[0] != activity_id]
-        _emit(runtime, "tool_completed", {
-            "activity_id": activity_id,
-            "tool_name": tool,
-            "outcome": _tool_outcome(kwargs.get("result")),
-        })
-
-    def pre_approval_request(**kwargs):
-        activity_id = start_id(
-            kwargs, ("approval_id", "request_id", "activity_id", "id"),
-            pending_approval_ids,
-        )
-        mode = "smart" if str(kwargs.get("surface") or "cli").lower() == "smart" else "human"
-        tool_activity_id = _identifier(
-            kwargs, "tool_activity_id", "tool_call_id", "call_id", fallback=""
-        )
-        if not tool_activity_id and active_tools:
-            tool_activity_id = active_tools[-1][0]
-        payload = {"activity_id": activity_id, "mode": mode}
-        if tool_activity_id:
-            payload["tool_activity_id"] = tool_activity_id
-        _emit(runtime, "approval_requested", payload)
-
-    def post_approval_response(**kwargs):
-        activity_id = finish_id(
-            kwargs, ("approval_id", "request_id", "activity_id", "id"),
-            pending_approval_ids,
-        )
-        decision = str(kwargs.get("choice") or "unknown").strip().lower()
-        if decision in {"deny", "smart_deny"}:
-            decision = "denied"
-        elif decision in {"once", "session", "always", "smart_approve"}:
-            decision = "approved"
-        payload = {"activity_id": activity_id, "decision": decision}
-        tool_activity_id = _identifier(
-            kwargs, "tool_activity_id", "tool_call_id", "call_id", fallback=""
-        )
-        if tool_activity_id:
-            payload["tool_activity_id"] = tool_activity_id
-        _emit(runtime, "approval_resolved", payload)
-
-    def pre_llm_call(**kwargs):
-        _emit(runtime, "turn_started", {"activity_id": start_id(
-            kwargs, ("session_id", "turn_id", "activity_id", "id"), pending_turn_ids
-        )})
-
-    def on_session_end(**kwargs):
-        _emit(runtime, "turn_ended", {
-            "activity_id": finish_id(
-                kwargs, ("session_id", "turn_id", "activity_id", "id"), pending_turn_ids
-            ),
-            "outcome": "interrupted" if kwargs.get("interrupted") else str(
-                kwargs.get("outcome") or "completed"
-            ),
-        })
-
-    def subagent_start(**kwargs):
-        _emit(runtime, "subagent_started", {"activity_id": start_id(
-            kwargs, ("subagent_id", "agent_id", "activity_id", "id"), pending_subagent_ids
-        )})
-
-    def subagent_stop(**kwargs):
-        _emit(runtime, "subagent_stopped", {
-            "activity_id": finish_id(
-                kwargs, ("subagent_id", "agent_id", "activity_id", "id"),
-                pending_subagent_ids,
-            ),
-            "outcome": str(kwargs.get("outcome") or "completed"),
-        })
-
-    callbacks = {
-        "pre_tool_call": pre_tool_call,
-        "post_tool_call": post_tool_call,
-        "pre_approval_request": pre_approval_request,
-        "post_approval_response": post_approval_response,
-        "pre_llm_call": pre_llm_call,
-        "on_session_end": on_session_end,
-        "subagent_start": subagent_start,
-        "subagent_stop": subagent_stop,
-    }
+    callback_names = (
+        "pre_tool_call",
+        "post_tool_call",
+        "pre_approval_request",
+        "post_approval_response",
+        "pre_llm_call",
+        "on_session_end",
+        "subagent_start",
+        "subagent_stop",
+    )
     _log("registering hooks...")
-    for name, callback in callbacks.items():
+    for name in callback_names:
         try:
-            ctx.register_hook(name, callback)
+            ctx.register_hook(name, adapter(name))
             _log(f"✓ {name} registered")
         except Exception as exc:
             _log(f"✗ {name}: {exc}")

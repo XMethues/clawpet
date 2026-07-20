@@ -31,12 +31,9 @@ PETS = [
 
 
 class RuntimeInterfaceTests(unittest.TestCase):
-    def test_new_runtime_owns_one_save_and_ignores_legacy_files(self):
+    def test_new_runtime_owns_one_save(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            (runtime_dir / "cultivation.json").write_text(
-                json.dumps({"stats": {"qi": 999}}), encoding="utf-8"
-            )
 
             runtime = ClawchatPetRuntime(
                 runtime_dir,
@@ -54,9 +51,62 @@ class RuntimeInterfaceTests(unittest.TestCase):
             self.assertEqual("xianxia", catalog["active"]["scene_id"])
             self.assertEqual("qingming", catalog["active"]["skin_id"])
             self.assertTrue((runtime_dir / "save.json").is_file())
-            self.assertEqual(999, json.loads(
-                (runtime_dir / "cultivation.json").read_text(encoding="utf-8")
-            )["stats"]["qi"])
+
+    def test_runtime_refuses_a_noncurrent_save_instead_of_converting_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            save_file = Path(tmp) / "save.json"
+            save_file.write_text(
+                json.dumps({"version": 1, "cultivation": {}}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "delete .*save.json"):
+                ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
+
+    def test_runtime_refuses_a_damaged_current_save_at_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            save_file = Path(tmp) / "save.json"
+            save_file.write_text(
+                json.dumps({
+                    "version": 2,
+                    "growth": {},
+                    "pet": {"current": "yinyue-2", "personalities": {}},
+                    "presentation": {},
+                }),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "delete .*save.json"):
+                ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
+
+    def test_raw_tools_are_aggregated_into_stable_capabilities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
+            for tool in ("read_file", "search_files"):
+                runtime.handle_activity("pre_tool_call", {
+                    "event_id": f"{tool}-start",
+                    "occurred_at": 1_000.0,
+                    "tool_call_id": tool,
+                    "tool_name": tool,
+                })
+                runtime.handle_activity("post_tool_call", {
+                    "event_id": f"{tool}-done",
+                    "occurred_at": 1_001.0,
+                    "tool_call_id": tool,
+                    "function_name": tool,
+                    "result": {"ok": True},
+                })
+
+            presentation = runtime.presentation()
+
+        self.assertEqual(
+            ["file-inspection"],
+            [item["id"] for item in presentation["capabilities"]],
+        )
+        self.assertEqual(
+            ["asset:file-inspection"],
+            [item["id"] for item in presentation["assets"]],
+        )
 
     def test_scene_and_skin_commands_preserve_one_coherent_selection(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -149,11 +199,10 @@ class RuntimeInterfaceTests(unittest.TestCase):
 
             restarted = ClawchatPetRuntime(runtime_dir, pet_catalog=PETS)
             presentation = restarted.presentation()
-            persisted = json.loads(runtime.save_file.read_text())
 
             self.assertEqual("boba", presentation["pet"]["slug"])
             self.assertEqual("configured", presentation["pet"]["personality_state"])
-            self.assertEqual("冲关", persisted["cultivation"]["policy"]["name"])
+            self.assertEqual("advance", presentation["strategy"]["id"])
             self.assertFalse((runtime_dir / "current_pet.json").exists())
             self.assertFalse((runtime_dir / "personalities.json").exists())
 
@@ -186,15 +235,16 @@ class RuntimeInterfaceTests(unittest.TestCase):
             )
             now[0] += 2 * 86_400
 
-            runtime.presentation()
-            first = json.loads(runtime.save_file.read_text())
-            runtime.presentation()
-            second = json.loads(runtime.save_file.read_text())
+            first = runtime.presentation()
+            second = runtime.presentation()
 
-            self.assertEqual(2, first["cultivation"]["dormancy"]["last_applied_stage"])
-            self.assertEqual(
-                first["cultivation"]["stats"], second["cultivation"]["stats"]
-            )
+            first_values = {
+                item["id"]: item["value"]
+                for item in first["meters"] + first["attributes"]
+            }
+            self.assertEqual(0.75, first_values["risk"])
+            self.assertEqual(0.93, first_values["stability"])
+            self.assertEqual(first, second)
 
     def test_activity_and_lazy_aging_use_the_same_injected_clock(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -202,20 +252,28 @@ class RuntimeInterfaceTests(unittest.TestCase):
             runtime = ClawchatPetRuntime(
                 Path(tmp), pet_catalog=PETS, clock=lambda: now[0]
             )
-            runtime.handle_activity({
-                "schema_version": 1,
+            runtime.handle_activity("pre_tool_call", {
                 "event_id": "start",
                 "occurred_at": now[0],
-                "kind": "tool_started",
-                "payload": {"activity_id": "tool", "tool_name": "read_file"},
+                "tool_call_id": "tool",
+                "tool_name": "read_file",
             })
             now[0] += 2 * 86_400
 
-            runtime.presentation()
-            save = json.loads(runtime.save_file.read_text())
+            presentation = runtime.presentation()
+            values = {
+                item["id"]: item["value"]
+                for item in presentation["meters"] + presentation["attributes"]
+            }
 
-            self.assertEqual(1_000.0, save["cultivation"]["profile"]["last_active"])
-            self.assertEqual(2, save["cultivation"]["dormancy"]["last_applied_stage"])
+            self.assertEqual(0.75, values["risk"])
+            self.assertEqual(
+                ["idle_decay", "idle_decay"],
+                [
+                    entry["kind"]
+                    for entry in presentation["chronicle"]["entries"][-2:]
+                ],
+            )
 
     def test_expired_activity_does_not_keep_the_last_tool_capability(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -223,16 +281,12 @@ class RuntimeInterfaceTests(unittest.TestCase):
             runtime = ClawchatPetRuntime(
                 Path(tmp), pet_catalog=PETS, clock=lambda: now[0]
             )
-            runtime.handle_activity({
-                "schema_version": 1,
+            runtime.handle_activity("post_tool_call", {
                 "event_id": "finish",
                 "occurred_at": now[0],
-                "kind": "tool_completed",
-                "payload": {
-                    "activity_id": "tool",
-                    "tool_name": "read_file",
-                    "outcome": "success",
-                },
+                "tool_call_id": "tool",
+                "function_name": "read_file",
+                "result": {"ok": True},
             })
             active = runtime.presentation()
             now[0] += 4

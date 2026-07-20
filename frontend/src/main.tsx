@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { api, Experience, Meter, PetInfo, SkinInfo, Voice } from './api';
 import './styles/main.css';
 
-const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, jump: 4, failed: 5, waiting: 6, subagent: 7, review: 8, unknown: 8 };
+const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, failed: 5, waiting: 6, subagent: 7, review: 8, unknown: 8 };
 const SKIN_VAR_MAP: Record<string, string> = {
   bgMain: '--bg-main', panel: '--panel', panelSoft: '--panel-soft', accent: '--accent', accentSoft: '--accent-soft',
   textMain: '--text-main', textMuted: '--text-muted', gold: '--gold', border: '--border', track: '--track',
@@ -45,7 +45,7 @@ function GrowthPanel({ experience }: { experience?: Experience }) {
   const stage = experience?.stage;
   const meters = experience?.meters || [];
   const attributes = experience?.attributes || [];
-  const isTrial = stage?.kind === 'tribulation' || stage?.kind === 'gate';
+  const isTrial = stage?.kind === 'trial' || stage?.kind === 'gate';
   return <>
     <div className="realm-row">
       <div>

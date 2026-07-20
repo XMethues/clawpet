@@ -16,7 +16,7 @@ _SKILL_REGISTERED = False
 
 def _skill_description(skill_path: Path) -> str:
     """Read the frontmatter description from a plugin SKILL.md."""
-    fallback = "Petdex cultivation pet gameplay and liveware presence."
+    fallback = "Petdex shared-growth gameplay and liveware presence."
     try:
         text = skill_path.read_text(encoding="utf-8")
     except Exception:

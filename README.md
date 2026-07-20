@@ -11,7 +11,7 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 - Uses the current Petdex entry as pet identity while sharing progress across pets and scenes
 - Stores an optional text-only personality independently for each Petdex slug
 - Ships xianxia and star-voyage scene adapters over the same settlement rules
-- Supports pets, skins, stages, capabilities, assets, daily strategies, and idle progression
+- Supports pets, skins, stages, capabilities, assets, strategies, and idle progression
 - Registers the bundled `clawchat-pet` skill with Hermes
 
 ## Runtime
@@ -23,6 +23,8 @@ When Hermes loads the plugin, it ensures that:
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 One authoritative runtime owns `save.json`, its lock, and atomic commits. Shared growth, current pet, per-pet personalities, current scene/skin, and per-skin visual overrides live in that one save. Petdex sprite/index files are cache, not product state. Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hermes hooks call the runtime directly in-process.
+
+The runtime accepts only the current `save.json` schema. It does not reset, migrate, or convert older formats; remove a noncurrent save manually before starting this version.
 
 ## Gameplay scenes
 

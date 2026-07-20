@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +10,7 @@ class PersonalityTests(unittest.TestCase):
     def test_personality_is_per_pet_and_does_not_change_growth(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
-            before = json.loads(runtime.save_file.read_text())["cultivation"]
+            before = runtime.presentation()
             runtime.command({"type": "select_pet", "pet_id": "boba"})
             configured = runtime.command({
                 "type": "configure_personality",
@@ -20,11 +19,14 @@ class PersonalityTests(unittest.TestCase):
             })
             runtime.command({"type": "select_pet", "pet_id": "yinyue-2"})
             returned = runtime.command({"type": "select_pet", "pet_id": "boba"})
-            after = json.loads(runtime.save_file.read_text())["cultivation"]
+            after = runtime.presentation()
 
         self.assertEqual("Ready.", configured["voice"]["text"])
         self.assertFalse(returned["pet"]["prompt_personality"])
-        self.assertEqual(before, after)
+        self.assertEqual(before["stage"], after["stage"])
+        self.assertEqual(before["meters"], after["meters"])
+        self.assertEqual(before["attributes"], after["attributes"])
+        self.assertEqual(before["chronicle"], after["chronicle"])
 
     def test_invalid_replacement_preserves_the_last_valid_profile(self):
         with tempfile.TemporaryDirectory() as tmp:

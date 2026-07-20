@@ -73,7 +73,7 @@ export type Experience = {
     total: number;
     label: string;
     badge: string;
-    kind: string;
+    kind: 'minor' | 'major' | 'gate' | 'trial';
     next_label: string;
     ready: boolean;
     hint?: string;

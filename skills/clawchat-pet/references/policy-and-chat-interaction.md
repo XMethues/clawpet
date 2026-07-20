@@ -1,6 +1,6 @@
 # Policy and Chat Interaction Notes
 
-Use this reference when interpreting owner language about the current pet's daily cultivation direction.
+Use this reference when interpreting owner language about the current pet's growth strategy.
 
 ## Layering Rule
 
@@ -32,8 +32,8 @@ The five choices are shared rule profiles. The xianxia scene labels them as belo
   Suppresses heart demon and improves recovery after rough streaks.
 
 悟道
-  Insight-focused. Good for thinking/research/planning-heavy days.
-  More comprehension from review/insight, slightly lower qi.
+  Insight-preserving. Good when the owner wants to protect accumulated insight.
+  Resists extended-idle insight loss, with slightly lower primary progress.
 
 调息
   Recovery-focused. Good when fatigue is high.

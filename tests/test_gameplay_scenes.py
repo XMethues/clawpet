@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,15 +10,11 @@ class GameplaySceneTests(unittest.TestCase):
     @staticmethod
     def event(event_id: str) -> dict:
         return {
-            "schema_version": 1,
             "event_id": event_id,
             "occurred_at": 100.0,
-            "kind": "tool_completed",
-            "payload": {
-                "activity_id": event_id,
-                "tool_name": "read_file",
-                "outcome": "success",
-            },
+            "tool_call_id": event_id,
+            "function_name": "read_file",
+            "result": {"ok": True},
         }
 
     @staticmethod
@@ -32,16 +27,13 @@ class GameplaySceneTests(unittest.TestCase):
     def test_scene_switch_reprojects_the_same_settled_growth(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
-            runtime.handle_activity(self.event("success"))
+            runtime.handle_activity("post_tool_call", self.event("success"))
             xianxia = runtime.presentation()
-            growth_before = json.loads(runtime.save_file.read_text())["cultivation"]
 
             star = runtime.command({
                 "type": "select_scene", "scene_id": "star-voyage"
             })
-            growth_after = json.loads(runtime.save_file.read_text())["cultivation"]
 
-        self.assertEqual(growth_before, growth_after)
         self.assertEqual(self.values(xianxia), self.values(star))
         self.assertEqual(xianxia["stage"]["index"], star["stage"]["index"])
         self.assertEqual("灵气", xianxia["meters"][0]["label"])
@@ -52,17 +44,30 @@ class GameplaySceneTests(unittest.TestCase):
             runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
             event = self.event("durable-success")
 
-            self.assertEqual("accepted", runtime.handle_activity(event))
+            self.assertEqual(
+                "accepted", runtime.handle_activity("post_tool_call", event)
+            )
+            first = runtime.presentation()
             runtime.command({"type": "select_scene", "scene_id": "star-voyage"})
-            self.assertEqual("duplicate", runtime.handle_activity(event))
-            save = json.loads(runtime.save_file.read_text())
+            runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
+            self.assertEqual(
+                "duplicate", runtime.handle_activity("post_tool_call", event)
+            )
+            second = runtime.presentation()
 
-        self.assertEqual(1, save["cultivation"]["counters"]["tool_success_total"])
+        self.assertEqual(self.values(first), self.values(second))
+        self.assertEqual(
+            1,
+            sum(
+                entry["kind"] == "work_succeeded"
+                for entry in second["chronicle"]["entries"]
+            ),
+        )
 
     def test_star_scene_translates_facts_while_personality_changes_only_voice(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = ClawchatPetRuntime(Path(tmp), pet_catalog=PETS)
-            runtime.handle_activity(self.event("success"))
+            runtime.handle_activity("post_tool_call", self.event("success"))
             runtime.command({"type": "select_scene", "scene_id": "star-voyage"})
             runtime.command({"type": "select_pet", "pet_id": "boba"})
             presentation = runtime.command({

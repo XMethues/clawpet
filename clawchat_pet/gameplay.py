@@ -1,4 +1,4 @@
-"""Project one shared growth save into selectable gameplay scenes.
+"""Project one scene-neutral growth snapshot into selectable gameplay scenes.
 
 Scenes are read-only adapters.  They name and narrate already-settled growth;
 they never participate in Hermes intake, deduplication, or reward formulas.
@@ -9,84 +9,66 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
-from .simulator import (
-    ARTIFACT_BY_TOOL,
-    POLICY_NAMES,
-    STRATEGY_ID_BY_POLICY,
-    REALM_PATH,
-    TECHNIQUE_BY_TOOL,
-)
+from .growth import GrowthFact, GrowthSnapshot
 
 DEFAULT_SCENE_ID = "xianxia"
 
-CAPABILITY_ID_BY_TOOL = {
-    "terminal": "command-execution",
-    "process": "command-execution",
-    "read_file": "file-inspection",
-    "search_files": "file-inspection",
-    "write_file": "file-editing",
-    "patch": "file-editing",
-    "todo": "mission-planning",
-    "web_search": "remote-research",
-    "web_extract": "remote-research",
-    "browser_navigate": "browser-operation",
-    "browser_snapshot": "browser-operation",
-    "browser_click": "browser-operation",
-    "browser_type": "browser-operation",
-    "browser_scroll": "browser-operation",
-    "browser_vision": "visual-observation",
-    "vision_analyze": "visual-observation",
-    "image_generate": "image-creation",
-    "execute_code": "code-simulation",
-    "delegate_task": "delegation",
-    "session_search": "history-retrieval",
-    "cronjob": "scheduled-watch",
-    "skill_view": "skill-learning",
-    "skill_manage": "skill-learning",
-    "memory": "memory-keeping",
+XIANXIA_TOOL_LABELS = {
+    "command-execution": "御剑诀",
+    "file-inspection": "天机推演",
+    "file-editing": "符箓编纂",
+    "mission-planning": "执事录",
+    "remote-research": "神识外放",
+    "browser-operation": "分身入世",
+    "visual-observation": "灵目观世",
+    "image-creation": "幻术造化",
+    "code-simulation": "内景推演",
+    "delegation": "分神化身",
+    "history-retrieval": "追溯前尘",
+    "scheduled-watch": "分身值守",
+    "skill-learning": "传承参悟",
+    "memory-keeping": "识海铭刻",
+}
+
+XIANXIA_ASSET_LABELS = {
+    "command-execution": "本命飞剑",
+    "file-inspection": "观天灵镜",
+    "file-editing": "符笔",
+    "mission-planning": "执事玉简",
+    "remote-research": "观天盘",
+    "browser-operation": "云舟",
+    "image-creation": "幻月灯",
+    "scheduled-watch": "值守傀儡",
+    "skill-learning": "传承玉匣",
 }
 
 STAR_TOOL_LABELS = {
-    "terminal": "推进器调试",
-    "process": "推进器调试",
-    "read_file": "星图解码",
-    "search_files": "星图解码",
-    "write_file": "航志编纂",
-    "patch": "航志编纂",
-    "todo": "任务编排",
-    "web_search": "深空扫描",
-    "web_extract": "深空扫描",
-    "browser_navigate": "探测艇巡航",
-    "browser_snapshot": "探测艇巡航",
-    "browser_click": "探测艇巡航",
-    "browser_type": "探测艇巡航",
-    "browser_scroll": "探测艇巡航",
-    "browser_vision": "光谱观测",
-    "vision_analyze": "光谱观测",
-    "image_generate": "全息构造",
-    "execute_code": "轨道模拟",
-    "delegate_task": "僚机协作",
-    "session_search": "航迹回溯",
-    "cronjob": "自动值守",
-    "skill_view": "协议研习",
-    "skill_manage": "协议研习",
-    "memory": "航行档案",
+    "command-execution": "推进器调试",
+    "file-inspection": "星图解码",
+    "file-editing": "航志编纂",
+    "mission-planning": "任务编排",
+    "remote-research": "深空扫描",
+    "browser-operation": "探测艇巡航",
+    "visual-observation": "光谱观测",
+    "image-creation": "全息构造",
+    "code-simulation": "轨道模拟",
+    "delegation": "僚机协作",
+    "history-retrieval": "航迹回溯",
+    "scheduled-watch": "自动值守",
+    "skill-learning": "协议研习",
+    "memory-keeping": "航行档案",
 }
 
 STAR_ASSET_LABELS = {
-    "terminal": "主推进器",
-    "process": "主推进器",
-    "read_file": "星图终端",
-    "search_files": "星图终端",
-    "write_file": "航志仪",
-    "patch": "航志仪",
-    "todo": "任务面板",
-    "web_search": "深空阵列",
-    "web_extract": "深空阵列",
-    "browser_navigate": "探测艇",
-    "image_generate": "全息投影仪",
-    "cronjob": "值守无人机",
-    "skill_manage": "协议数据库",
+    "command-execution": "主推进器",
+    "file-inspection": "星图终端",
+    "file-editing": "航志仪",
+    "mission-planning": "任务面板",
+    "remote-research": "深空阵列",
+    "browser-operation": "探测艇",
+    "image-creation": "全息投影仪",
+    "scheduled-watch": "值守无人机",
+    "skill-learning": "协议数据库",
 }
 
 STAR_STAGE_LABELS = tuple(
@@ -98,13 +80,23 @@ STAR_STAGE_LABELS = tuple(
     + [f"银河领航员·{phase}" for phase in ("初级", "中级", "高级", "资深")]
 )
 
+XIANXIA_STAGE_LABELS = tuple(
+    [f"炼气{level}层" for level in range(1, 10)]
+    + [f"筑基{phase}" for phase in ("初期", "中期", "后期", "圆满")]
+    + [f"金丹{phase}" for phase in ("初期", "中期", "后期", "圆满")]
+    + [f"元婴{phase}" for phase in ("初期", "中期", "后期", "圆满")]
+    + ["化神门槛", "化神·雷劫试炼", "化神·元神试炼"]
+    + [f"化神{phase}" for phase in ("初期", "中期", "后期", "圆满")]
+)
+
 XIANXIA_STAGE_BADGES = tuple(
-    "试炼"
-    if str(item.get("kind") or "") in {"gate", "tribulation"}
+    "炼气" if index < 9
+    else "筑基" if index < 13
+    else "金丹" if index < 17
+    else "元婴" if index < 21
+    else "试炼" if index < 24
     else "化神"
-    if "化神" in str(item.get("label") or "")
-    else str(item.get("phase") or item.get("label") or "")[:4]
-    for item in REALM_PATH
+    for index in range(len(XIANXIA_STAGE_LABELS))
 )
 
 STAR_STAGE_BADGES = tuple(
@@ -128,7 +120,7 @@ class GameplayScene(Protocol):
 
     def project(
         self,
-        save: Mapping[str, Any],
+        growth: GrowthSnapshot,
         activity: Mapping[str, Any],
         pet: Mapping[str, Any],
         personality: Mapping[str, Any],
@@ -157,13 +149,8 @@ class SceneDefinition:
     chronicle_title: str
     default_skin_id: str
     skin_ids: tuple[str, ...]
-    preserve_fact_text: bool = False
 
     def __post_init__(self) -> None:
-        if len(self.stage_labels) != len(REALM_PATH):
-            raise ValueError(
-                f"scene {self.id!r} must define {len(REALM_PATH)} stage labels"
-            )
         if len(self.stage_badges) != len(self.stage_labels):
             raise ValueError(f"scene {self.id!r} must define one badge per stage")
         required_meters = {
@@ -171,11 +158,14 @@ class SceneDefinition:
         }
         if required_meters - set(self.meter_labels):
             raise ValueError(f"scene {self.id!r} is missing meter labels")
-        if set(STRATEGY_ID_BY_POLICY.values()) - set(self.strategy_labels):
+        required_strategies = {
+            "balanced", "advance", "stabilize", "learn", "recover"
+        }
+        if required_strategies - set(self.strategy_labels):
             raise ValueError(f"scene {self.id!r} is missing strategy labels")
         if {"trial_ready", "cap", "ready", "target"} - set(self.hint_templates):
             raise ValueError(f"scene {self.id!r} is missing hint templates")
-        if "unknown" not in self.chronicle_templates and not self.preserve_fact_text:
+        if "unknown" not in self.chronicle_templates:
             raise ValueError(f"scene {self.id!r} requires an unknown-event template")
 
     def summary(self) -> dict[str, Any]:
@@ -187,11 +177,13 @@ class SceneDefinition:
             "skin_ids": list(self.skin_ids),
         }
 
-    def _tool_label(self, tool: str) -> str:
-        return self.tool_labels.get(tool, self.unknown_tool_label)
+    def _tool_label(self, capability_id: str) -> str:
+        return self.tool_labels.get(capability_id, self.unknown_tool_label)
 
-    def _asset_label(self, tool: str, fallback: str) -> str:
-        return self.asset_labels.get(tool, fallback or self.unknown_asset_label)
+    def _asset_label(self, capability_id: str, fallback: str) -> str:
+        return self.asset_labels.get(
+            capability_id, fallback or self.unknown_asset_label
+        )
 
     def _badge(self, index: int) -> str:
         return self.stage_badges[index]
@@ -205,7 +197,7 @@ class SceneDefinition:
         requirements: Mapping[str, Any],
     ) -> str:
         template_key = (
-            "trial_ready" if kind == "tribulation" and ready
+            "trial_ready" if kind == "trial" and ready
             else "cap" if kind == "cap"
             else "ready" if ready
             else "target"
@@ -227,151 +219,127 @@ class SceneDefinition:
 
     def _voice(
         self,
-        save: Mapping[str, Any],
+        growth: GrowthSnapshot,
         activity: Mapping[str, Any],
         pet: Mapping[str, Any],
         personality: Mapping[str, Any],
     ) -> dict[str, Any]:
-        stored = copy.deepcopy(save.get("voice") or {})
-        event = str(activity.get("state") or stored.get("event") or "idle")
+        event = str(activity.get("state") or "idle")
         profile = personality.get("profile") or {}
         lines = profile.get("lines") or {}
-        custom = lines.get(event) or lines.get(str(stored.get("event") or "idle"))
+        custom = lines.get(event)
         if custom:
             text = str(custom[0])
-        elif self.preserve_fact_text and stored.get("text"):
-            text = str(stored["text"])
-            event = str(stored.get("event") or event)
         else:
             pool = self.voice_lines.get(event) or self.voice_lines.get("idle") or ("我在。",)
             text = str(pool[0])
+        latest_fact_at = (
+            growth.recent_facts[-1].occurred_at if growth.recent_facts else 0.0
+        )
         return {
             "speaker": str(pet.get("displayName") or "宠物"),
             "mood": event,
             "text": text,
-            "ts": float(stored.get("ts") or 0),
+            "ts": max(float(activity.get("ts") or 0), latest_fact_at),
             "event": event,
         }
 
-    def _chronicle_text(self, event: Mapping[str, Any]) -> str:
-        text = str(event.get("text") or "")
-        if self.preserve_fact_text:
-            return text
-        typ = str(event.get("type") or "")
-        data = event.get("data") if isinstance(event.get("data"), Mapping) else {}
-        tool = str(data.get("tool") or "")
-        template_key = (
-            "breakthrough"
-            if typ in {"minor_breakthrough", "major_breakthrough", "tribulation_pass"}
-            else "idle"
-            if typ in {"idle_decay", "idle_regression", "regression"}
-            else typ
-        )
+    def _chronicle_text(self, fact: GrowthFact) -> str:
+        data = fact.data
+        capability_id = fact.capability_id
         template = self.chronicle_templates.get(
-            template_key, self.chronicle_templates["unknown"]
+            fact.kind, self.chronicle_templates["unknown"]
         )
-        stage_index = int(data.get("stage_index") or 0)
+        stage_index = int(data.get("to_index") or 0)
         stage_index = max(0, min(stage_index, len(self.stage_labels) - 1))
-        strategy_id = STRATEGY_ID_BY_POLICY.get(
-            str(data.get("policy") or ""), "balanced"
-        )
-        rendered = template.format(
-            tool=self._tool_label(tool),
-            asset=self._asset_label(tool, ""),
+        strategy_id = str(data.get("strategy_id") or "balanced")
+        return template.format(
+            tool=self._tool_label(capability_id),
+            asset=self._asset_label(capability_id, ""),
             primary_gain=float(data.get("primary_gain") or 0),
             stage=self.stage_labels[stage_index],
-            strategy=self.strategy_labels[strategy_id],
+            strategy=self.strategy_labels.get(
+                strategy_id, self.strategy_labels["balanced"]
+            ),
             level=int(data.get("level") or 1),
+            idle_stage=int(data.get("stage") or 0),
         )
-        return rendered
 
     def project(
         self,
-        save: Mapping[str, Any],
+        growth: GrowthSnapshot,
         activity: Mapping[str, Any],
         pet: Mapping[str, Any],
         personality: Mapping[str, Any],
     ) -> dict[str, Any]:
-        realm = save.get("realm") or {}
-        stats = save.get("stats") or {}
-        progress = save.get("progress") or {}
-        target = progress.get("next_breakthrough") or {}
-        index = int(realm.get("path_index") or 0)
-        index = max(0, min(index, len(self.stage_labels) - 1))
+        if growth.stage.total != len(self.stage_labels):
+            raise ValueError(
+                f"scene {self.id!r} does not label every shared growth stage"
+            )
+        index = growth.stage.index
         stage_label = self.stage_labels[index]
         next_label = (
             self.stage_labels[index + 1]
             if index + 1 < len(self.stage_labels)
             else self.end_label
         )
-        kind = str(target.get("type") or "minor")
-        ready = bool(realm.get("breakthrough_ready"))
-        requirements = {
-            "primary": target.get("qi_required", stats.get("max_qi", 0)),
-            "risk": target.get("heart_demon_max", 0),
-            "strain": target.get("fatigue_max", 0),
-            "stability": target.get("dao_heart_min", 0),
-            "insight": target.get("comprehension_min", 0),
-        }
+        kind = growth.stage.kind
+        ready = growth.stage.ready
+        requirements = growth.stage.requirements
         meters = [
             {
                 "id": "primary", "label": self.meter_labels["primary"],
-                "value": float(stats.get("qi", 0)),
-                "max": float(stats.get("max_qi", 1)), "tone": "primary",
+                "value": growth.dimensions["primary"].value,
+                "max": growth.dimensions["primary"].maximum or 1.0,
+                "tone": "primary",
             },
             {
                 "id": "risk", "label": self.meter_labels["risk"],
-                "value": float(stats.get("heart_demon", 0)),
-                "max": 100.0, "tone": "risk",
+                "value": growth.dimensions["risk"].value,
+                "max": growth.dimensions["risk"].maximum or 100.0,
+                "tone": "risk",
             },
         ]
         attributes = [
-            {"id": key, "label": self.meter_labels[key], "value": float(stats.get(source, 0))}
-            for key, source in (
-                ("stability", "dao_heart"),
-                ("insight", "comprehension"),
-                ("strain", "fatigue"),
-                ("fortune", "fate"),
-            )
-        ]
-        current_policy = str((save.get("policy") or {}).get("name") or POLICY_NAMES[0])
-        strategy_id = STRATEGY_ID_BY_POLICY.get(current_policy, "balanced")
-        choices = [
             {
-                "id": STRATEGY_ID_BY_POLICY[name],
-                "label": self.strategy_labels[STRATEGY_ID_BY_POLICY[name]],
+                "id": key,
+                "label": self.meter_labels[key],
+                "value": growth.dimensions[key].value,
             }
-            for name in POLICY_NAMES
+            for key in ("stability", "insight", "strain", "fortune")
+        ]
+        strategy_id = growth.strategy.id
+        choices = [
+            {"id": choice, "label": self.strategy_labels[choice]}
+            for choice in growth.strategy.choices
         ]
         activity_view = copy.deepcopy(dict(activity))
-        current_tool = str(activity_view.pop("current_tool", "") or "")
+        current_capability_id = str(
+            activity_view.pop("current_capability_id", "") or ""
+        )
         chronicle_entries = []
-        for event in save.get("event_log") or []:
+        for fact in growth.recent_facts:
             chronicle_entries.append({
-                "ts": float(event.get("ts") or 0),
-                "kind": str(event.get("type") or "unknown"),
-                "text": self._chronicle_text(event),
+                "ts": fact.occurred_at,
+                "kind": fact.kind,
+                "text": self._chronicle_text(fact),
             })
         capabilities = []
-        for stored_name, item in (save.get("techniques") or {}).items():
-            tool = str(item.get("source") or "")
+        for capability_id, item in growth.capabilities.items():
             capabilities.append({
-                "id": CAPABILITY_ID_BY_TOOL.get(tool, f"tool:{tool or stored_name}"),
-                "label": self._tool_label(tool) if tool else str(stored_name),
-                "level": int(item.get("level") or 1),
-                "xp": float(item.get("xp") or 0),
-                "xp_next": float(item.get("xp_next") or 0),
+                "id": capability_id,
+                "label": self._tool_label(capability_id),
+                "level": item.level,
+                "xp": item.xp,
+                "xp_next": item.xp_next,
             })
         assets = []
-        for stored_name, item in (save.get("artifacts") or {}).items():
-            tool = str(item.get("bound_tool") or "")
-            grade = str(item.get("grade") or "")
-            grade = self.grade_labels.get(grade, grade)
+        for capability_id, item in growth.assets.items():
             assets.append({
-                "id": f"asset:{CAPABILITY_ID_BY_TOOL.get(tool, tool or stored_name)}",
-                "label": self._asset_label(tool, str(stored_name)),
-                "level": int(item.get("level") or 1),
-                "grade": grade,
+                "id": f"asset:{capability_id}",
+                "label": self._asset_label(capability_id, ""),
+                "level": item.level,
+                "grade": self.grade_labels.get(item.tier, item.tier),
             })
         return {
             "schema_version": 1,
@@ -381,9 +349,9 @@ class SceneDefinition:
                 **activity_view,
                 "label": self.action_labels.get(str(activity.get("state") or "idle"), ""),
                 "capability": {
-                    "id": CAPABILITY_ID_BY_TOOL.get(current_tool, f"tool:{current_tool}"),
-                    "label": self._tool_label(current_tool),
-                } if current_tool else None,
+                    "id": current_capability_id,
+                    "label": self._tool_label(current_capability_id),
+                } if current_capability_id else None,
             },
             "stage": {
                 "id": f"stage-{index:02d}",
@@ -395,7 +363,7 @@ class SceneDefinition:
                 "next_label": next_label,
                 "ready": ready,
                 "hint": self._hint(stage_label, next_label, ready, kind, requirements),
-                "requirements": requirements,
+                "requirements": dict(requirements),
             },
             "meters": meters,
             "attributes": attributes,
@@ -404,7 +372,7 @@ class SceneDefinition:
                 "label": self.strategy_labels[strategy_id],
                 "choices": choices,
             },
-            "voice": self._voice(save, activity, pet, personality),
+            "voice": self._voice(growth, activity, pet, personality),
             "chronicle": {
                 "title": self.chronicle_title,
                 "entries": chronicle_entries,
@@ -418,7 +386,7 @@ XIANXIA_SCENE = SceneDefinition(
     id="xianxia",
     name="修仙",
     description="境界、灵气、心魔、历练与道场纪事。",
-    stage_labels=tuple(str(item["label"]) for item in REALM_PATH),
+    stage_labels=XIANXIA_STAGE_LABELS,
     stage_badges=XIANXIA_STAGE_BADGES,
     end_label="更高天地待开启",
     meter_labels={
@@ -434,13 +402,13 @@ XIANXIA_SCENE = SceneDefinition(
         "wave": "收束因果", "failed": "心魔侵扰", "waiting": "静候法旨",
         "jump": "灵光乍现", "unknown": "因果未明", "subagent": "分神化身",
     },
-    tool_labels=TECHNIQUE_BY_TOOL,
+    tool_labels=XIANXIA_TOOL_LABELS,
     unknown_tool_label="无名术法",
-    asset_labels={tool: item[0] for tool, item in ARTIFACT_BY_TOOL.items()},
+    asset_labels=XIANXIA_ASSET_LABELS,
     unknown_asset_label="无名法器",
-    grade_labels={},
+    grade_labels={"basic": "凡器", "enhanced": "灵器", "core": "法宝"},
     hint_templates={
-        "trial_ready": "{stage}可结算；等待下一次成功历练或顿悟推进至{next}。",
+        "trial_ready": "{stage}可结算；等待下一次成功历练推进至{next}。",
         "cap": "已到当前天地边界；更高境界待开启。",
         "ready": "可突破至{next}",
         "target": (
@@ -449,12 +417,33 @@ XIANXIA_SCENE = SceneDefinition(
             "{insight_label}≥{insight}。"
         ),
     },
-    chronicle_templates={},
-    voice_lines={},
+    chronicle_templates={
+        "born": "宠物入驻 clawchat-pet 道场，开始吐纳修行。",
+        "work_started": "宠物开始施展{tool}。",
+        "work_succeeded": "历练功成：{tool}，灵气 +{primary_gain:.1f}。",
+        "work_failed": "历练受阻：{tool}，心魔滋生。",
+        "work_recovered": "宠物斩去杂念，破除一缕心魔。",
+        "stage_advanced": "气机圆满，宠物突破至{stage}。",
+        "strategy_selected": "今日修行策略改为{strategy}。",
+        "idle_decay": "久未温养，道场状态发生第 {idle_stage} 阶段变化。",
+        "stage_regressed": "道基浮动，宠物退回{stage}。",
+        "capability_advanced": "{tool}小有所成，提升至 Lv.{level}。",
+        "asset_advanced": "{asset}完成一次淬炼。",
+        "unknown": "记录到一项尚未命名的成长事实。",
+    },
+    voice_lines={
+        "idle": ("我在。灵息很稳。",),
+        "review": ("我在推演这条因果线。",),
+        "run": ("正在历练，别眨眼。",),
+        "wave": ("功成，记一笔。",),
+        "failed": ("有反噬，但还能压住。",),
+        "waiting": ("我收剑等你确认。",),
+        "unknown": ("这道因果尚不明确。",),
+        "subagent": ("分神化身已经出发。",),
+    },
     chronicle_title="道场纪事",
     default_skin_id="qingming",
     skin_ids=("qingming", "chiyan", "xuanshui"),
-    preserve_fact_text=True,
 )
 
 STAR_VOYAGE_SCENE = SceneDefinition(
@@ -481,7 +470,7 @@ STAR_VOYAGE_SCENE = SceneDefinition(
     unknown_tool_label="未分类任务",
     asset_labels=STAR_ASSET_LABELS,
     unknown_asset_label="通用任务模块",
-    grade_labels={"凡器": "基础", "灵器": "增强", "法宝": "核心"},
+    grade_labels={"basic": "基础", "enhanced": "增强", "core": "核心"},
     hint_templates={
         "trial_ready": "{stage}准备就绪；下一次任务成功将完成试航并进入{next}。",
         "cap": "已抵达当前星图边界；更远航区尚待开放。",
@@ -493,18 +482,17 @@ STAR_VOYAGE_SCENE = SceneDefinition(
         ),
     },
     chronicle_templates={
-        "birth": "宠物加入远征基地，开始准备首航。",
-        "tool_success": "任务完成：{tool}，航程数据 +{primary_gain:.1f}。",
-        "tool_failed": "任务受阻：{tool}，故障风险上升。",
-        "review": "宠物分析星图片刻，科研数据微增。",
-        "recovered": "宠物排除一处隐患，舰体稳定得到提升。",
-        "waiting": "指令尚未确认，宠物保持待命。",
-        "insight": "新的航线灵感闪现，宠物记录了坐标。",
-        "breakthrough": "航程达标，宠物晋升至{stage}。",
-        "policy": "今日航行策略改为{strategy}。",
-        "idle": "长期停泊使航行状态有所衰减，宠物正在重新校准。",
-        "technique_up": "{tool}熟练度提升至 Lv.{level}。",
-        "artifact_up": "{asset}完成一次模块升级。",
+        "born": "宠物加入远征基地，开始准备首航。",
+        "work_started": "远征任务启动：{tool}。",
+        "work_succeeded": "任务完成：{tool}，航程数据 +{primary_gain:.1f}。",
+        "work_failed": "任务受阻：{tool}，故障风险上升。",
+        "work_recovered": "宠物排除一处隐患，舰体稳定得到提升。",
+        "stage_advanced": "航程达标，宠物晋升至{stage}。",
+        "strategy_selected": "今日航行策略改为{strategy}。",
+        "idle_decay": "长期停泊触发第 {idle_stage} 阶段校准。",
+        "stage_regressed": "航行状态回退至{stage}。",
+        "capability_advanced": "{tool}熟练度提升至 Lv.{level}。",
+        "asset_advanced": "{asset}完成一次模块升级。",
         "unknown": "记录到一项尚未分类的成长事实。",
     },
     voice_lines={
@@ -558,9 +546,9 @@ class GameplayScenes:
     def project(
         self,
         scene_id: str,
-        save: Mapping[str, Any],
+        growth: GrowthSnapshot,
         activity: Mapping[str, Any],
         pet: Mapping[str, Any],
         personality: Mapping[str, Any],
     ) -> dict[str, Any]:
-        return self.get(scene_id).project(save, activity, pet, personality)
+        return self.get(scene_id).project(growth, activity, pet, personality)
