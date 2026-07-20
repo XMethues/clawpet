@@ -21,3 +21,7 @@ frontend/node_modules/
 .idea/
 .DS_Store
 *~
+
+# Local agent configuration and skills
+.agent/
+.agents/
