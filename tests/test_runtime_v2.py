@@ -121,7 +121,10 @@ class RuntimeInterfaceTests(unittest.TestCase):
             customized = runtime.command({
                 "type": "customize_skin",
                 "skin_id": "chiyan",
-                "visual": {"accent": "#123456"},
+                "visual": {
+                    "accent": "#123456",
+                    "backgroundImage": "url('https://example.com/custom.webp')",
+                },
             })
             voyage = runtime.command({
                 "type": "select_scene", "scene_id": "star-voyage"
@@ -129,6 +132,10 @@ class RuntimeInterfaceTests(unittest.TestCase):
 
             self.assertEqual("chiyan", selected["skin"]["id"])
             self.assertEqual("#123456", customized["skin"]["visual"]["accent"])
+            self.assertEqual(
+                "url('https://example.com/custom.webp')",
+                customized["skin"]["visual"]["backgroundImage"],
+            )
             self.assertEqual("star-voyage", voyage["scene"]["id"])
             self.assertEqual("xinghai", voyage["skin"]["id"])
             self.assertEqual("star-voyage", voyage["skin"]["scene_id"])
@@ -149,7 +156,12 @@ class RuntimeInterfaceTests(unittest.TestCase):
             self.assertEqual("star-voyage", catalog["active"]["scene_id"])
             self.assertEqual("xinghai", catalog["active"]["skin_id"])
             self.assertEqual(
-                {"chiyan": {"accent": "#123456"}},
+                {
+                    "chiyan": {
+                        "accent": "#123456",
+                        "backgroundImage": "url('https://example.com/custom.webp')",
+                    }
+                },
                 persisted["presentation"]["skin_overrides"],
             )
             self.assertEqual(

@@ -1,6 +1,7 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 :root {
   --bg-main: radial-gradient(circle at 50% 0%, rgba(76, 135, 180, 0.24), transparent 34%), linear-gradient(180deg, #0b1d2a 0%, #0a0d18 100%);
+  --scene-art: none;
   --panel: rgba(11, 21, 35, 0.84);
   --panel-soft: rgba(12, 28, 44, 0.74);
   --accent: #65c8ff;
@@ -20,7 +21,19 @@
 html, body, #root { width:100%; height:100%; overflow:hidden; }
 body { background:var(--bg-main); color:var(--text-main); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; transition:background .45s ease, color .3s ease; }
 button, input { font: inherit; }
-.shell { width:100%; max-width:430px; height:100%; margin:0 auto; display:flex; flex-direction:column; align-items:stretch; padding:12px 12px 0; }
+.shell { position:relative; isolation:isolate; width:100%; max-width:430px; height:100%; margin:0 auto; display:flex; flex-direction:column; align-items:stretch; padding:12px 12px 0; overflow:hidden; background:var(--bg-main); box-shadow:0 0 50px rgba(0,0,0,.35); }
+.shell::before, .shell::after { content:""; position:absolute; inset:0; pointer-events:none; }
+.shell::before { z-index:-2; background-image:var(--scene-art); background-position:center; background-repeat:no-repeat; background-size:cover; opacity:var(--scene-art-opacity); }
+.shell::after { z-index:-1; background:var(--scene-overlay); }
+.shell > * { position:relative; z-index:1; }
+.shell[data-scene="xianxia"] {
+  --scene-art-opacity:.82;
+  --scene-overlay:linear-gradient(180deg, rgba(3,12,17,.3) 0%, rgba(3,12,17,.06) 42%, rgba(3,10,13,.22) 74%, rgba(3,8,11,.68) 100%);
+}
+.shell[data-scene="star-voyage"] {
+  --scene-art-opacity:.88;
+  --scene-overlay:linear-gradient(180deg, rgba(1,5,14,.14) 0%, rgba(1,6,16,.02) 42%, rgba(2,8,18,.18) 72%, rgba(1,4,10,.7) 100%);
+}
 .topbar { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .name { font-size:20px; font-weight:700; color:var(--text-main); letter-spacing:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 0 14px var(--glow); }
 .top-actions { flex-shrink:0; display:flex; align-items:center; justify-content:flex-end; gap:5px; }
@@ -66,3 +79,16 @@ button, input { font: inherit; }
 .logbox ul { list-style:none; }
 .logbox li { color:var(--text-main); opacity:.78; font-size:10px; line-height:1.45; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .logbox li:first-child { color:var(--gold); opacity:1; }
+.shell[data-scene="xianxia"] .name,
+.shell[data-scene="xianxia"] .realm-label { font-family:"Songti SC","STSong","Noto Serif CJK SC",serif; letter-spacing:.08em; }
+.shell[data-scene="xianxia"] :is(.barbox,.stat,.hint) { border-radius:10px 3px; backdrop-filter:blur(5px); }
+.shell[data-scene="xianxia"] .logbox { border-radius:14px 14px 0 0; backdrop-filter:blur(7px); }
+.shell[data-scene="star-voyage"] .name,
+.shell[data-scene="star-voyage"] .realm-label { font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace; letter-spacing:.04em; }
+.shell[data-scene="star-voyage"] :is(.barbox,.stat,.hint) { border-radius:2px; backdrop-filter:blur(5px); }
+.shell[data-scene="star-voyage"] .track { border-radius:1px; }
+.shell[data-scene="star-voyage"] .fill { border-radius:1px; box-shadow:0 0 8px var(--accent); }
+.shell[data-scene="star-voyage"] .logbox { border-radius:3px 3px 0 0; backdrop-filter:blur(7px); }
+@media (prefers-reduced-motion: reduce) {
+  body, .fill { transition:none; }
+}

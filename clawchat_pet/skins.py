@@ -8,6 +8,7 @@ from typing import Any
 
 _BASE_VISUAL = {
     "bgMain": "linear-gradient(180deg, #0b1d2a 0%, #0a0d18 100%)",
+    "backgroundImage": "none",
     "panel": "rgba(11, 21, 35, 0.84)",
     "panelSoft": "rgba(12, 28, 44, 0.74)",
     "accent": "#65c8ff",
@@ -46,10 +47,13 @@ def _skin(
 
 BUILTIN_SKINS: dict[str, dict[str, Any]] = {
     "qingming": _skin(
-        "qingming", "xianxia", "青冥道场", "青蓝、清净、稳定的修仙道场。", {}
+        "qingming", "xianxia", "青冥道场", "青蓝、清净、稳定的修仙道场。", {
+            "backgroundImage": "url('/assets/scenes/xianxia.svg')",
+        }
     ),
     "chiyan": _skin(
         "chiyan", "xianxia", "赤焰道场", "赤红、金橙、烈焰的修仙道场。", {
+            "backgroundImage": "url('/assets/scenes/xianxia.svg')",
             "bgMain": "linear-gradient(180deg, #27110d 0%, #100b12 100%)",
             "panel": "rgba(45, 18, 13, 0.84)",
             "panelSoft": "rgba(58, 23, 12, 0.76)",
@@ -63,6 +67,7 @@ BUILTIN_SKINS: dict[str, dict[str, Any]] = {
     ),
     "xuanshui": _skin(
         "xuanshui", "xianxia", "玄水道场", "深蓝、水纹、安静的修仙道场。", {
+            "backgroundImage": "url('/assets/scenes/xianxia.svg')",
             "bgMain": "linear-gradient(180deg, #071929 0%, #06101d 100%)",
             "panel": "rgba(7, 24, 39, 0.86)", "panelSoft": "rgba(8, 34, 54, 0.76)",
             "accent": "#5fe7dc", "accentSoft": "rgba(95, 231, 220, 0.36)",
@@ -75,6 +80,7 @@ BUILTIN_SKINS: dict[str, dict[str, Any]] = {
     ),
     "xinghai": _skin(
         "xinghai", "star-voyage", "星海舰桥", "深空蓝与冷青色的远征舰桥。", {
+            "backgroundImage": "url('/assets/scenes/star-voyage.svg')",
             "bgMain": "linear-gradient(180deg, #071228 0%, #050812 100%)",
             "panel": "rgba(8, 19, 42, 0.86)", "panelSoft": "rgba(11, 29, 58, 0.76)",
             "accent": "#68d8ff", "accentSoft": "rgba(104, 216, 255, 0.36)",
@@ -87,6 +93,7 @@ BUILTIN_SKINS: dict[str, dict[str, Any]] = {
     ),
     "chenhui": _skin(
         "chenhui", "star-voyage", "晨辉舰桥", "暖金晨辉中的轻型探索舰桥。", {
+            "backgroundImage": "url('/assets/scenes/star-voyage.svg')",
             "bgMain": "linear-gradient(180deg, #251c27 0%, #0e101b 100%)",
             "panel": "rgba(37, 28, 39, 0.86)", "panelSoft": "rgba(54, 39, 48, 0.76)",
             "accent": "#ffca72", "accentSoft": "rgba(255, 202, 114, 0.38)",

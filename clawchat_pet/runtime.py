@@ -141,6 +141,18 @@ class ClawchatPetRuntime:
         with self._lock:
             return self._pets.sprite_path(slug)
 
+    def background_asset(self, filename: str) -> Path:
+        """Resolve one user-owned background without exposing arbitrary files."""
+        if not filename or Path(filename).name != filename:
+            raise KeyError("invalid background asset")
+        backgrounds_dir = (self.runtime_dir / "backgrounds").resolve()
+        candidate = (backgrounds_dir / filename).resolve()
+        try:
+            candidate.relative_to(backgrounds_dir)
+        except ValueError:
+            raise KeyError("invalid background asset") from None
+        return candidate
+
     @staticmethod
     def _required_text(command: Mapping[str, Any], key: str) -> str:
         value = command.get(key)

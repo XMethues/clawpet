@@ -5,7 +5,7 @@ import './styles/main.css';
 
 const STATE_ROWS: Record<string, number> = { idle: 0, run: 1, wave: 3, failed: 5, waiting: 6, subagent: 7, review: 8, unknown: 8 };
 const SKIN_VAR_MAP: Record<string, string> = {
-  bgMain: '--bg-main', panel: '--panel', panelSoft: '--panel-soft', accent: '--accent', accentSoft: '--accent-soft',
+  bgMain: '--bg-main', backgroundImage: '--scene-art', panel: '--panel', panelSoft: '--panel-soft', accent: '--accent', accentSoft: '--accent-soft',
   textMain: '--text-main', textMuted: '--text-muted', gold: '--gold', border: '--border', track: '--track',
   bubbleBg: '--bubble-bg', bubbleBorder: '--bubble-border', bubbleText: '--bubble-text', qi: '--qi', demon: '--demon', glow: '--glow',
 };

@@ -19,6 +19,15 @@ HOST = os.environ.get("CLAWCHAT_PET_HOST", "127.0.0.1")
 PORT = int(os.environ.get("CLAWCHAT_PET_PORT", "54321"))
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 WEB_ROOT = Path(__file__).resolve().parent / "web"
+IMAGE_CONTENT_TYPES = {
+    ".avif": "image/avif",
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -101,6 +110,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "public, max-age=3600",
                 )
                 return
+            background_prefix = "/assets/backgrounds/"
+            if path.startswith(background_prefix):
+                filename = unquote(path[len(background_prefix):])
+                suffix = Path(filename).suffix.lower()
+                if (
+                    not filename
+                    or "/" in filename
+                    or "\\" in filename
+                    or suffix not in IMAGE_CONTENT_TYPES
+                ):
+                    self._send_json({"error": "not found"}, 404)
+                    return
+                self._send_file(
+                    self.server.runtime.background_asset(filename),
+                    IMAGE_CONTENT_TYPES[suffix],
+                    "no-store",
+                )
+                return
             if path in {"/", "/index.html"}:
                 self._send_file(
                     WEB_ROOT / "index.html", "text/html; charset=utf-8", "no-store"
@@ -111,8 +138,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 content_type = {
                     ".js": "application/javascript; charset=utf-8",
                     ".css": "text/css; charset=utf-8",
-                    ".png": "image/png",
-                    ".svg": "image/svg+xml",
+                    **IMAGE_CONTENT_TYPES,
                 }.get(Path(safe).suffix.lower(), "application/octet-stream")
                 self._send_file(
                     WEB_ROOT / safe,

@@ -100,6 +100,10 @@ class ServerRuntimeTests(unittest.TestCase):
     def test_runtime_serves_health_and_presentation_from_an_isolated_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
+            backgrounds_dir = runtime_dir / "backgrounds"
+            backgrounds_dir.mkdir()
+            custom_background = b"local webp background"
+            (backgrounds_dir / "custom.webp").write_bytes(custom_background)
             runner = ServerRunner(
                 runtime=ClawchatPetRuntime(runtime_dir, pet_catalog=PETS),
                 bootstrap=lambda: None,
@@ -111,6 +115,21 @@ class ServerRuntimeTests(unittest.TestCase):
                     health = json.load(response)
                 with urllib.request.urlopen(runner.base_url + "/presentation", timeout=1) as response:
                     presentation = json.load(response)
+                with urllib.request.urlopen(
+                    runner.base_url + "/assets/scenes/xianxia.svg", timeout=1
+                ) as response:
+                    xianxia_background = response.read()
+                with urllib.request.urlopen(
+                    runner.base_url + "/assets/scenes/star-voyage.svg", timeout=1
+                ) as response:
+                    star_background = response.read()
+                with urllib.request.urlopen(
+                    runner.base_url + "/assets/backgrounds/custom.webp?v=1",
+                    timeout=1,
+                ) as response:
+                    local_background = response.read()
+                    local_background_type = response.headers["Content-Type"]
+                    local_background_cache = response.headers["Cache-Control"]
             finally:
                 runner.stop()
 
@@ -120,6 +139,15 @@ class ServerRuntimeTests(unittest.TestCase):
         })
         self.assertEqual("idle", presentation["activity"]["state"])
         self.assertEqual("xianxia", presentation["scene"]["id"])
+        self.assertIn(
+            b'<svg xmlns="http://www.w3.org/2000/svg"', xianxia_background
+        )
+        self.assertIn(
+            b'<svg xmlns="http://www.w3.org/2000/svg"', star_background
+        )
+        self.assertEqual(custom_background, local_background)
+        self.assertEqual("image/webp", local_background_type)
+        self.assertEqual("no-store", local_background_cache)
 
     def test_repeated_start_keeps_one_owned_server(self):
         with tempfile.TemporaryDirectory() as tmp:
