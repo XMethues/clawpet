@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import atexit
-import logging
 import sys
-import threading
 from pathlib import Path
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
@@ -12,11 +10,7 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 _AUTOSTART_REGISTERED = False
-_LIVEWARE_ATEXIT_REGISTERED = False
 _SKILL_REGISTERED = False
-_PUBLICATION_THREAD = None
-_PUBLICATION_LOCK = threading.Lock()
-_LOGGER = logging.getLogger("clawchat-pet")
 
 
 def _skill_description(skill_path: Path) -> str:
@@ -80,71 +74,15 @@ def _ensure_server_running() -> bool:
     return started
 
 
-def _ensure_liveware_running() -> bool:
-    """Start the Liveware tunnel agent and register plugin-owned cleanup once."""
-    global _LIVEWARE_ATEXIT_REGISTERED
-
-    from clawchat_pet import liveware
-
-    started = liveware.ensure_running()
-    if not _LIVEWARE_ATEXIT_REGISTERED:
-        atexit.register(liveware.stop)
-        _LIVEWARE_ATEXIT_REGISTERED = True
-    return started
-
-
-def _run_liveware_publication() -> None:
-    """Repair the external ClawPet publication without blocking Gateway load."""
-    try:
-        from clawchat_pet.publication import (
-            HermesLivewareAdapter,
-            LivewarePublication,
-        )
-
-        result = LivewarePublication(HermesLivewareAdapter()).ensure()
-        _LOGGER.info(
-            "ClawPet publication ready app_id=%s url=%s",
-            result.app_id,
-            result.url,
-        )
-    except Exception:
-        _LOGGER.exception("ClawPet publication startup failed")
-    finally:
-        # A fresh machine may have started the agent before Liveware login was
-        # repaired. Ensure it gets another chance after publication settles.
-        try:
-            _ensure_liveware_running()
-        except Exception:
-            _LOGGER.exception("ClawPet Liveware agent restart failed")
-
-
-def _start_liveware_publication() -> bool:
-    """Start at most one publication repair worker in this plugin process."""
-    global _PUBLICATION_THREAD
-    with _PUBLICATION_LOCK:
-        if (
-            _PUBLICATION_THREAD is not None
-            and _PUBLICATION_THREAD.is_alive()
-        ):
-            return False
-        _PUBLICATION_THREAD = threading.Thread(
-            target=_run_liveware_publication,
-            name="clawchat-pet-publication",
-            daemon=True,
-        )
-        _PUBLICATION_THREAD.start()
-        return True
-
-
 def register(ctx) -> None:
+    from clawchat_pet.gateway_startup import install_gateway_hook
     from clawchat_pet.hooks import register_hooks
     from clawchat_pet.server import get_runtime
 
     register_hooks(ctx, get_runtime())
     _register_skill(ctx)
 
-    # The plugin owns both parts of its runtime lifecycle: start the local PET
-    # API first, then start the Liveware data-plane that exposes that API.
+    # The plugin process owns the local API. Liveware waits for the Gateway's
+    # startup event so configured messaging platforms are connected first.
     _ensure_server_running()
-    _ensure_liveware_running()
-    _start_liveware_publication()
+    install_gateway_hook(_PLUGIN_DIR)

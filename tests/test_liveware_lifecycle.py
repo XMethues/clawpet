@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from clawchat_pet import gateway_startup, liveware
 from clawchat_pet.liveware import LivewareAgentRunner
 
 
@@ -105,24 +106,33 @@ class LivewareAgentRunnerTests(unittest.TestCase):
 
 
 class PluginRegistrationTests(unittest.TestCase):
-    def test_register_starts_pet_server_and_liveware(self):
+    def test_register_starts_pet_server_and_installs_gateway_hook(self):
         plugin = load_plugin_entrypoint()
         ctx = Mock()
-        with (
-            patch.object(plugin, "_ensure_server_running") as pet_start,
-            patch.object(plugin, "_start_liveware_publication") as publication_start,
-            patch("clawchat_pet.liveware.ensure_running") as liveware_start,
-            patch("clawchat_pet.server.get_runtime", return_value=Mock()),
-        ):
-            plugin.register(ctx)
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(os.environ, {"HERMES_HOME": tmp}),
+                patch.object(plugin, "_ensure_server_running") as pet_start,
+                patch("clawchat_pet.liveware.ensure_running") as liveware_start,
+                patch(
+                    "clawchat_pet.publication.LivewarePublication.ensure"
+                ) as publication_start,
+                patch("clawchat_pet.server.get_runtime", return_value=Mock()),
+            ):
+                plugin.register(ctx)
+                installed = Path(tmp) / "hooks" / gateway_startup.HOOK_NAME
+
+                self.assertEqual("1", os.environ[gateway_startup.PLUGIN_ACTIVE_ENV])
+                self.assertEqual(
+                    {"HOOK.yaml", "handler.py"},
+                    {path.name for path in installed.iterdir()},
+                )
 
         pet_start.assert_called_once_with()
-        liveware_start.assert_called_once_with()
-        publication_start.assert_called_once_with()
+        liveware_start.assert_not_called()
+        publication_start.assert_not_called()
 
-    def test_register_schedules_clawpet_publication_during_startup(self):
-        plugin = load_plugin_entrypoint()
-        ctx = Mock()
+    def test_gateway_startup_schedules_liveware_publication_once(self):
         threads = []
 
         class CapturedThread:
@@ -140,22 +150,29 @@ class PluginRegistrationTests(unittest.TestCase):
                 return self.started
 
         with (
-            patch.object(plugin, "_ensure_server_running"),
-            patch("clawchat_pet.liveware.ensure_running"),
-            patch("clawchat_pet.server.get_runtime", return_value=Mock()),
-            patch("threading.Thread", CapturedThread),
+            patch.object(gateway_startup, "_STARTUP_THREAD", None),
+            patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch("clawchat_pet.gateway_startup.atexit.register") as register_exit,
+            patch("clawchat_pet.gateway_startup.threading.Thread", CapturedThread),
         ):
-            plugin.register(ctx)
+            first = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
+            repeated = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
 
+        self.assertTrue(first)
+        self.assertFalse(repeated)
         self.assertEqual(1, len(threads))
-        self.assertEqual("clawchat-pet-publication", threads[0].name)
+        self.assertEqual("clawchat-pet-liveware-startup", threads[0].name)
         self.assertTrue(threads[0].daemon)
         self.assertTrue(threads[0].started)
+        register_exit.assert_called_once_with(liveware.stop)
 
-    def test_publication_failure_does_not_block_gateway_startup(self):
-        plugin = load_plugin_entrypoint()
-        ctx = Mock()
-
+    def test_gateway_startup_repairs_publication_between_agent_attempts(self):
         class ImmediateThread:
             def __init__(self, *, target, name, daemon):
                 self.target = target
@@ -166,21 +183,95 @@ class PluginRegistrationTests(unittest.TestCase):
             def is_alive(self):
                 return False
 
-        with tempfile.TemporaryDirectory() as tmp:
-            with (
-                patch.dict(os.environ, {"HERMES_HOME": tmp}),
-                patch.object(plugin, "_ensure_server_running"),
-                patch("clawchat_pet.liveware.ensure_running") as liveware_start,
-                patch("clawchat_pet.server.get_runtime", return_value=Mock()),
-                patch("threading.Thread", ImmediateThread),
-                self.assertLogs("clawchat-pet", level="ERROR") as logs,
-            ):
-                plugin.register(ctx)
+        publication = Mock()
+        publication.ensure.return_value = Mock(app_id="app-1", url="https://pet")
+        with (
+            patch.object(gateway_startup, "_STARTUP_THREAD", None),
+            patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(gateway_startup, "_ensure_liveware_running") as ensure_agent,
+            patch("clawchat_pet.gateway_startup.atexit.register"),
+            patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),
+            patch(
+                "clawchat_pet.publication.HermesLivewareAdapter"
+            ) as adapter_type,
+            patch(
+                "clawchat_pet.publication.LivewarePublication",
+                return_value=publication,
+            ) as publication_type,
+        ):
+            scheduled = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
 
-        self.assertEqual(2, liveware_start.call_count)
+        self.assertTrue(scheduled)
+        self.assertEqual(2, ensure_agent.call_count)
+        publication_type.assert_called_once_with(adapter_type.return_value)
+        publication.ensure.assert_called_once_with()
+
+    def test_publication_failure_does_not_escape_gateway_startup_worker(self):
+        class ImmediateThread:
+            def __init__(self, *, target, name, daemon):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def is_alive(self):
+                return False
+
+        publication = Mock()
+        publication.ensure.side_effect = RuntimeError("offline")
+        with (
+            patch.object(gateway_startup, "_STARTUP_THREAD", None),
+            patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(gateway_startup, "_ensure_liveware_running") as ensure_agent,
+            patch("clawchat_pet.gateway_startup.atexit.register"),
+            patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),
+            patch("clawchat_pet.publication.HermesLivewareAdapter"),
+            patch(
+                "clawchat_pet.publication.LivewarePublication",
+                return_value=publication,
+            ),
+            self.assertLogs("clawchat-pet", level="ERROR") as logs,
+        ):
+            scheduled = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
+
+        self.assertTrue(scheduled)
+        self.assertEqual(2, ensure_agent.call_count)
         self.assertTrue(any(
             "publication startup failed" in entry for entry in logs.output
         ))
+
+    def test_materialized_hook_delegates_only_when_plugin_is_active(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {}, clear=False):
+                installed = gateway_startup.install_gateway_hook(
+                    repo_root,
+                    hermes_home=Path(tmp),
+                )
+                spec = importlib.util.spec_from_file_location(
+                    "clawchat_pet_gateway_hook_test",
+                    installed / "handler.py",
+                )
+                hook = importlib.util.module_from_spec(spec)
+                assert spec.loader is not None
+                spec.loader.exec_module(hook)
+
+                with patch.object(gateway_startup, "handle_gateway_startup") as handle:
+                    hook.handle("gateway:startup", {"platforms": ["clawchat"]})
+                    handle.assert_called_once_with(
+                        "gateway:startup",
+                        {"platforms": ["clawchat"]},
+                    )
+
+                    os.environ[gateway_startup.PLUGIN_ACTIVE_ENV] = "0"
+                    hook.handle("gateway:startup", {"platforms": []})
+                    handle.assert_called_once()
 
 
 if __name__ == "__main__":

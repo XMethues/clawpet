@@ -1,0 +1,4 @@
+name: clawchat-pet-startup
+description: Start the plugin-owned ClawPet Liveware publication after Gateway connects.
+events:
+  - gateway:startup

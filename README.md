@@ -16,17 +16,24 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 
 ## Runtime
 
-When Hermes loads the plugin, it ensures that:
+When Hermes loads the plugin, it:
 
-1. The pet service is available on `127.0.0.1:54321`
-2. A Liveware app named `ClawPet` exists and is bound to that service
-3. The app is registered in ClawChat and the Liveware tunnel agent is running
+1. Ensures the pet service is available on `127.0.0.1:54321`
+2. Materializes the bundled `clawchat-pet-startup` Gateway hook under the
+   active Hermes home
 
-Publication repair runs in a background startup worker so Liveware or ClawChat
-failures do not block the Gateway. A valid saved Liveware login and an existing
-`ClawPet` app are reused. The binding is refreshed on every startup because the
-Liveware CLI does not expose a binding query; app creation and ClawChat
-registration only run when missing or stale.
+When the Gateway emits `gateway:startup`, that hook ensures that:
+
+1. A Liveware app named `ClawPet` exists and is bound to the pet service
+2. The app is registered in ClawChat and the Liveware tunnel agent is running
+
+Liveware agent startup and publication repair run in one background worker so
+Liveware or ClawChat failures do not block the Gateway. The worker starts only
+for the Gateway, after messaging platforms connect; ordinary Hermes CLI plugin
+loads still serve the local pet API without starting Liveware. A valid saved
+Liveware login and an existing `ClawPet` app are reused. The binding is refreshed
+on every Gateway startup because the Liveware CLI does not expose a binding
+query; app creation and ClawChat registration only run when missing or stale.
 
 Runtime state is stored outside this repository under `~/.hermes/clawchat-pet/`.
 One authoritative runtime owns `save.json`, its lock, and atomic commits. Shared growth, current pet, per-pet personalities, current scene/skin, and per-skin visual overrides live in that one save. Petdex sprite/index files are cache, not product state. Transient activity is memory-only and returns to idle whenever the Hermes plugin process restarts. Hermes hooks call the runtime directly in-process.
