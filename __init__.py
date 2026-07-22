@@ -51,7 +51,6 @@ def _register_skill(ctx) -> None:
         "clawchat-pet",
         skill_path,
         description=_skill_description(skill_path),
-        discoverable=True,
     )
     _SKILL_REGISTERED = True
 

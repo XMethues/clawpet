@@ -46,20 +46,19 @@ class ServerRuntimeTests(unittest.TestCase):
         calls = []
 
         class Context:
-            def register_skill(self, name, path, description=None, **options):
-                calls.append((name, path, description, options))
+            def register_skill(self, name, path, description=None):
+                calls.append((name, path, description))
 
         plugin._register_skill(Context())
 
         self.assertEqual(1, len(calls))
-        name, path, description, options = calls[0]
+        name, path, description = calls[0]
         self.assertEqual("clawchat-pet", name)
         self.assertEqual(
             repo_root / "skills" / "clawchat-pet" / "SKILL.md",
             path,
         )
         self.assertIn("玩法场景", description)
-        self.assertEqual({"discoverable": True}, options)
 
     def test_health_is_available_while_runtime_bootstrap_is_still_warming(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -181,7 +180,7 @@ class Context:
     def register_hook(self, name, callback):
         pass
 
-    def register_skill(self, name, path, description=None, **options):
+    def register_skill(self, name, path, description=None):
         pass
 
 path = Path.cwd() / "__init__.py"
@@ -234,7 +233,7 @@ class Context:
     def register_hook(self, name, callback):
         pass
 
-    def register_skill(self, name, path, description=None, **options):
+    def register_skill(self, name, path, description=None):
         pass
 
 path = Path.cwd() / "__init__.py"
