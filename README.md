@@ -14,6 +14,16 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 - Supports pets, skins, stages, capabilities, assets, strategies, and idle progression
 - Registers the bundled `clawchat-pet` skill with Hermes
 
+## Installation
+
+Install and enable the plugin directly from GitHub, then restart the Gateway so
+the plugin and its startup hook are loaded:
+
+```bash
+hermes plugins install XMethues/clawpet --enable
+hermes gateway restart
+```
+
 ## Runtime
 
 When Hermes loads the plugin, it:

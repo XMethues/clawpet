@@ -30,5 +30,17 @@ class BundledSkillContractTests(unittest.TestCase):
         self.assertIn("yinyue-2", skill)
 
 
+class ReadmeInstallationContractTests(unittest.TestCase):
+    def test_readme_documents_the_enabled_plugin_install_command(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("## Installation", readme)
+        self.assertIn(
+            "hermes plugins install XMethues/clawpet --enable",
+            readme,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
