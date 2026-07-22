@@ -148,6 +148,81 @@ class ServerRuntimeTests(unittest.TestCase):
         self.assertEqual("image/webp", local_background_type)
         self.assertEqual("no-store", local_background_cache)
 
+    def test_directory_install_projects_presentation_and_pet_without_pillow(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        script = r'''
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.modules["PIL"] = None
+
+hermes_home = Path(os.environ["HERMES_HOME"])
+pet_dir = hermes_home / "pets" / "yinyue-2"
+pet_dir.mkdir(parents=True)
+(pet_dir / "pet.json").write_text(
+    json.dumps({
+        "displayName": "Yinyue",
+        "spritesheetPath": "spritesheet.webp",
+    }),
+    encoding="utf-8",
+)
+
+width = 1536
+height = 1872
+vp8x = (
+    b"VP8X"
+    + (10).to_bytes(4, "little")
+    + b"\x10\x00\x00\x00"
+    + (width - 1).to_bytes(3, "little")
+    + (height - 1).to_bytes(3, "little")
+)
+sprite = b"RIFF" + (len(vp8x) + 4).to_bytes(4, "little") + b"WEBP" + vp8x
+(pet_dir / "spritesheet.webp").write_bytes(sprite)
+
+index = hermes_home / "clawchat-pet" / "cache" / "petdex-index.json"
+index.parent.mkdir(parents=True)
+index.write_text(
+    json.dumps({"ts": time.time(), "source": "test", "pets": []}),
+    encoding="utf-8",
+)
+
+from clawchat_pet.runtime import ClawchatPetRuntime
+
+runtime = ClawchatPetRuntime(hermes_home / "clawchat-pet")
+presentation = runtime.presentation()
+asset_path = runtime.pet_asset("yinyue-2")
+asset = asset_path.read_bytes()
+
+print(json.dumps({
+    "pet": presentation["pet"]["slug"],
+    "asset_suffix": asset_path.suffix,
+    "asset_matches": asset == sprite,
+}))
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env.update({
+                "HERMES_HOME": tmp,
+                "PYTHONPATH": str(repo_root),
+            })
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=repo_root,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        outcome = json.loads(result.stdout.strip().splitlines()[-1])
+        self.assertEqual("yinyue-2", outcome["pet"])
+        self.assertEqual(".webp", outcome["asset_suffix"])
+        self.assertTrue(outcome["asset_matches"])
+
     def test_repeated_start_keeps_one_owned_server(self):
         with tempfile.TemporaryDirectory() as tmp:
             runner = ServerRunner(

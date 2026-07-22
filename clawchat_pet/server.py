@@ -104,9 +104,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not slug or "/" in slug or "\\" in slug:
                     self._send_json({"error": "not found"}, 404)
                     return
+                asset = self.server.runtime.pet_asset(slug)
                 self._send_file(
-                    self.server.runtime.pet_asset(slug),
-                    "image/png",
+                    asset,
+                    IMAGE_CONTENT_TYPES.get(
+                        asset.suffix.lower(), "application/octet-stream"
+                    ),
                     "public, max-age=3600",
                 )
                 return

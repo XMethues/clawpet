@@ -10,14 +10,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from PIL import Image
-
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 CACHE_ROOT = HERMES_HOME / "clawchat-pet" / "cache"
 PETS_CACHE = CACHE_ROOT / "pets"
 INDEX_FILE = CACHE_ROOT / "petdex-index.json"
 PETDEX_URL = "https://petdex.dev/"
 UA = "Mozilla/5.0 (Hermes clawchat-pet)"
+IMAGE_SUFFIXES = (".png", ".webp", ".avif", ".gif", ".jpg", ".jpeg")
+CELL_WIDTH = 192
+CELL_HEIGHT = 208
+DEFAULT_SPRITE_WIDTH = 1536
+DEFAULT_SPRITE_HEIGHT = 1872
 
 STATE_ROWS = {
     "idle": 0,
@@ -80,10 +83,90 @@ def _download(url: str, dest: Path, timeout: int = 40) -> None:
     os.replace(tmp, dest)
 
 
-def _scan_sprite(png_path: Path) -> dict[str, Any]:
-    img = Image.open(png_path).convert("RGBA")
+def _pillow_image():
+    """Return Pillow's Image module when the host happens to provide it."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    return Image
+
+
+def _image_size(path: Path) -> tuple[int, int] | None:
+    """Read common sprite dimensions without requiring an image library."""
+    with path.open("rb") as source:
+        data = source.read(64)
+    if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+        return (
+            int.from_bytes(data[16:20], "big"),
+            int.from_bytes(data[20:24], "big"),
+        )
+    if data[:6] in {b"GIF87a", b"GIF89a"} and len(data) >= 10:
+        return (
+            int.from_bytes(data[6:8], "little"),
+            int.from_bytes(data[8:10], "little"),
+        )
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        chunk = data[12:16]
+        if chunk == b"VP8X" and len(data) >= 30:
+            return (
+                int.from_bytes(data[24:27], "little") + 1,
+                int.from_bytes(data[27:30], "little") + 1,
+            )
+        if chunk == b"VP8L" and len(data) >= 25 and data[20] == 0x2F:
+            bits = int.from_bytes(data[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if chunk == b"VP8 ":
+            marker = data.find(b"\x9d\x01\x2a", 20)
+            if marker >= 0 and len(data) >= marker + 7:
+                return (
+                    int.from_bytes(data[marker + 3:marker + 5], "little") & 0x3FFF,
+                    int.from_bytes(data[marker + 5:marker + 7], "little") & 0x3FFF,
+                )
+    return None
+
+
+def _static_sprite_scan(path: Path, asset_kind: str) -> dict[str, Any]:
+    """Describe a safe, static sprite fallback when Pillow is unavailable."""
+    dimensions = _image_size(path)
+    if dimensions is None:
+        dimensions = (
+            (DEFAULT_SPRITE_WIDTH, DEFAULT_SPRITE_HEIGHT)
+            if asset_kind in {"sprite", "local"}
+            else (CELL_WIDTH, CELL_HEIGHT)
+        )
+    width, height = dimensions
+    columns = max(1, width // CELL_WIDTH)
+    rows = max(1, height // CELL_HEIGHT)
+    frames_by_row = [1] * rows
+    frames: dict[str, int] = {}
+    if rows >= 9:
+        for state, row in STATE_ROWS.items():
+            if row < rows:
+                frames[state] = 1
+        frames["review"] = frames.get("review", frames.get("running", 1))
+    else:
+        for state in ["idle", "run", "wave", "jump", "failed", "waiting", "review"]:
+            frames[state] = 1
+    return {
+        "width": width,
+        "height": height,
+        "cellWidth": CELL_WIDTH,
+        "cellHeight": CELL_HEIGHT,
+        "columns": columns,
+        "rows": rows,
+        "framesByRow": frames_by_row,
+        "frames": frames,
+    }
+
+
+def _scan_sprite(png_path: Path, image_module=None) -> dict[str, Any]:
+    image_module = image_module or _pillow_image()
+    if image_module is None:
+        return _static_sprite_scan(png_path, "sprite")
+    img = image_module.open(png_path).convert("RGBA")
     width, height = img.size
-    cell_w, cell_h = 192, 208
+    cell_w, cell_h = CELL_WIDTH, CELL_HEIGHT
     columns = max(1, width // cell_w)
     rows = max(1, height // cell_h)
     frames_by_row: list[int] = []
@@ -143,6 +226,22 @@ def _read_meta(slug: str) -> PetInfo | None:
         return info
     except Exception:
         return None
+
+
+def _cached_asset(slug_dir: Path) -> Path | None:
+    preferred = slug_dir / "sprite.png"
+    if preferred.is_file():
+        return preferred
+    for suffix in IMAGE_SUFFIXES:
+        candidate = slug_dir / f"source{suffix}"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _source_suffix(value: str) -> str:
+    suffix = Path(urlparse(value).path).suffix.lower()
+    return suffix if suffix in IMAGE_SUFFIXES else ".webp"
 
 
 def _local_pet(slug: str, pet_dir: Path) -> PetInfo | None:
@@ -281,28 +380,31 @@ def ensure_cached(slug: str) -> PetInfo:
     if pet is None:
         raise KeyError(f"unknown pet: {slug}")
     cached = _read_meta(slug)
-    if cached and (PETS_CACHE / slug / "sprite.png").exists():
+    slug_dir = PETS_CACHE / slug
+    if cached and _cached_asset(slug_dir) is not None:
         return cached
 
-    slug_dir = PETS_CACHE / slug
     slug_dir.mkdir(parents=True, exist_ok=True)
-    source = slug_dir / "source.webp"
     png = slug_dir / "sprite.png"
 
     if pet.source == "local" and pet.assetUrl:
         src_path = Path(pet.assetUrl)
         if not src_path.exists():
             raise FileNotFoundError(str(src_path))
-        shutil_src = src_path
-        Image.open(shutil_src).convert("RGBA").save(png, "PNG")
+        source = slug_dir / f"source{_source_suffix(str(src_path))}"
         source.write_bytes(src_path.read_bytes())
     elif pet.assetUrl:
+        source = slug_dir / f"source{_source_suffix(pet.assetUrl)}"
         _download(pet.assetUrl, source)
-        Image.open(source).convert("RGBA").save(png, "PNG")
     else:
         raise ValueError(f"pet {slug} has no asset")
 
-    scan = _scan_sprite(png)
+    image_module = _pillow_image()
+    if image_module is None:
+        scan = _static_sprite_scan(source, pet.assetKind)
+    else:
+        image_module.open(source).convert("RGBA").save(png, "PNG")
+        scan = _scan_sprite(png, image_module)
     info = PetInfo(
         slug=pet.slug,
         displayName=pet.displayName,
@@ -327,7 +429,7 @@ def ensure_cached(slug: str) -> PetInfo:
 
 def sprite_path(slug: str) -> Path:
     info = ensure_cached(slug)
-    p = PETS_CACHE / info.slug / "sprite.png"
-    if not p.exists():
-        raise FileNotFoundError(str(p))
-    return p
+    path = _cached_asset(PETS_CACHE / info.slug)
+    if path is None:
+        raise FileNotFoundError(str(PETS_CACHE / info.slug))
+    return path

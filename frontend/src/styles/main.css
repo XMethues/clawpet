@@ -26,6 +26,12 @@ button, input { font: inherit; }
 .shell::before { z-index:-2; background-image:var(--scene-art); background-position:center; background-repeat:no-repeat; background-size:cover; opacity:var(--scene-art-opacity); }
 .shell::after { z-index:-1; background:var(--scene-overlay); }
 .shell > * { position:relative; z-index:1; }
+.service-shell { justify-content:center; }
+.service-status { display:flex; flex-direction:column; align-items:center; gap:8px; padding:18px; border:1px solid var(--border); border-radius:12px; background:var(--panel); color:var(--text-muted); text-align:center; box-shadow:0 0 24px var(--glow); }
+.service-status strong { color:var(--text-main); font-size:15px; }
+.service-status span { font-size:11px; }
+.service-status.failed { border-color:var(--demon); }
+.service-status.failed strong { color:var(--gold); }
 .shell[data-scene="xianxia"] {
   --scene-art-opacity:.82;
   --scene-overlay:linear-gradient(180deg, rgba(3,12,17,.3) 0%, rgba(3,12,17,.06) 42%, rgba(3,10,13,.22) 74%, rgba(3,8,11,.68) 100%);

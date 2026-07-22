@@ -17,7 +17,8 @@ A Hermes Agent plugin that turns agent activity into one persistent pet growth j
 ## Installation
 
 Install and enable the plugin directly from GitHub, then restart the Gateway so
-the plugin and its startup hook are loaded:
+the plugin and its startup hook are loaded. No separate Python dependency
+installation is required for a directory plugin install:
 
 ```bash
 hermes plugins install XMethues/clawpet --enable
@@ -67,14 +68,15 @@ To add a built-in scene, define another `SceneDefinition` in `clawchat_pet/gamep
 ## Python environment
 
 Python dependencies are managed with [uv](https://docs.astral.sh/uv/). The
-project targets the same Python 3.11 minimum as Hermes Agent.
+project targets the same Python 3.11 minimum as Hermes Agent. The runtime works
+without third-party Python packages: it caches Petdex WebP sprites directly and
+uses safe static activity frames. Pillow is an optional development dependency
+that enables exact non-empty animation-frame scanning and PNG conversion.
 
 ```bash
 uv sync --locked
+uv sync --locked --group sprite-analysis  # optional Pillow enhancement
 ```
-
-This creates a local `.venv` and installs the locked Pillow dependency used by
-the Petdex sprite pipeline.
 
 ## Frontend
 

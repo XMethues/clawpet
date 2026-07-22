@@ -112,15 +112,32 @@ function Chronicle({ experience }: { experience?: Experience }) {
 
 function App() {
   const [experience, setExperience] = useState<Experience>();
+  const [loadError, setLoadError] = useState<string>();
 
   useEffect(() => { applySkin(experience?.skin); }, [experience?.skin]);
 
   useEffect(() => {
-    const refresh = () => api.presentation().then(setExperience).catch(() => {});
+    const refresh = () => api.presentation()
+      .then(value => {
+        setExperience(value);
+        setLoadError(undefined);
+      })
+      .catch(error => {
+        setLoadError(error instanceof Error ? error.message : '未知错误');
+      });
     refresh();
     const interval = window.setInterval(refresh, 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  if (!experience) {
+    return <div className="shell service-shell">
+      <div className={`service-status ${loadError ? 'failed' : ''}`} role="status">
+        <strong>{loadError ? '宠物服务暂不可用' : '正在连接宠物服务……'}</strong>
+        {loadError ? <span>请求失败：{loadError}</span> : null}
+      </div>
+    </div>;
+  }
 
   const state = experience?.activity?.state || 'idle';
   return <div className="shell" data-scene={experience?.scene?.id || 'xianxia'} data-skin={experience?.skin?.id || 'qingming'}>

@@ -42,5 +42,17 @@ class ReadmeInstallationContractTests(unittest.TestCase):
         )
 
 
+class FrontendFailureContractTests(unittest.TestCase):
+    def test_frontend_reports_presentation_failures_instead_of_showing_defaults(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "frontend" / "src" / "main.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn(".catch(() => {})", source)
+        self.assertIn("宠物服务暂不可用", source)
+        self.assertIn("请求失败：", source)
+
+
 if __name__ == "__main__":
     unittest.main()

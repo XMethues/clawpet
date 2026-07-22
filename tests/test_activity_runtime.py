@@ -67,6 +67,31 @@ class MinimalHTTPAdapterTests(unittest.TestCase):
         self.assertEqual("star-voyage", changed["scene"]["id"])
         self.assertEqual((200, b"\x89PNG\r\n\x1a\n"), (asset_status, asset))
 
+    def test_pet_asset_response_uses_the_cached_files_content_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            sprite = runtime_dir / "sprite.webp"
+            sprite.write_bytes(b"RIFF\x00\x00\x00\x00WEBP")
+            pets = [{**pet, "spritePath": str(sprite)} for pet in PETS]
+            runner = ServerRunner(
+                runtime=ClawchatPetRuntime(runtime_dir, pet_catalog=pets),
+                bootstrap=lambda: None,
+            )
+            runner.start(host="127.0.0.1", port=0)
+            try:
+                with urllib.request.urlopen(
+                    runner.base_url + "/assets/pets/yinyue-2.png", timeout=1
+                ) as response:
+                    status = response.status
+                    content_type = response.headers["Content-Type"]
+                    body = response.read()
+            finally:
+                runner.stop()
+
+        self.assertEqual(200, status)
+        self.assertEqual("image/webp", content_type)
+        self.assertEqual(b"RIFF\x00\x00\x00\x00WEBP", body)
+
     def test_old_http_interfaces_are_not_compatible(self):
         with tempfile.TemporaryDirectory() as tmp:
             _runtime, runner = self.start(tmp)
