@@ -14,7 +14,8 @@ HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 CACHE_ROOT = HERMES_HOME / "clawchat-pet" / "cache"
 PETS_CACHE = CACHE_ROOT / "pets"
 INDEX_FILE = CACHE_ROOT / "petdex-index.json"
-PETDEX_URL = "https://petdex.dev/"
+PETDEX_MANIFEST_URL = "https://petdex.dev/api/manifest"
+INDEX_VERSION = 2
 UA = "Mozilla/5.0 (Hermes clawchat-pet)"
 IMAGE_SUFFIXES = (".png", ".webp", ".avif", ".gif", ".jpg", ".jpeg")
 CELL_WIDTH = 192
@@ -287,30 +288,29 @@ def local_pets() -> list[PetInfo]:
     return out
 
 
-def _extract_petdex_index(html: str) -> list[PetInfo]:
-    assets = sorted(set(re.findall(r"https://assets\.petdex\.dev/[^\\\"'<>\s&)]+", html)))
+def _extract_petdex_manifest(raw_manifest: str) -> list[PetInfo]:
+    manifest = json.loads(raw_manifest)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("pets"), list):
+        raise ValueError("Petdex manifest must contain a pets array")
+
     items: dict[str, PetInfo] = {}
-    for url in assets:
-        if not url.endswith(("sprite.webp", "spritesheet.webp", "preview.webp")):
+    for raw in manifest["pets"]:
+        if not isinstance(raw, dict):
             continue
-        parsed = urlparse(url)
-        parts = [p for p in parsed.path.split("/") if p]
-        if len(parts) < 2:
+        slug = str(raw.get("slug") or "").strip()
+        asset_url = str(raw.get("spritesheetUrl") or "").strip()
+        if not slug or not asset_url:
             continue
-        # /pets/<slug>/sprite.webp or /curated/<slug>/spritesheet.webp
-        slug = parts[-2]
-        kind = "preview" if parts[-1] == "preview.webp" else "sprite"
-        # Prefer full sprite/spritesheet over preview.
-        existing = items.get(slug)
-        if existing and existing.assetKind == "sprite" and kind == "preview":
+        parsed_asset = urlparse(asset_url)
+        if parsed_asset.scheme != "https" or parsed_asset.hostname != "assets.petdex.dev":
             continue
         meta = _read_meta(slug)
-        item = PetInfo(
+        items[slug] = PetInfo(
             slug=slug,
-            displayName=_slug_title(slug),
+            displayName=str(raw.get("displayName") or _slug_title(slug)),
             source="petdex",
-            assetUrl=url,
-            assetKind=kind,
+            assetUrl=asset_url,
+            assetKind="sprite",
             cached=bool(meta),
             spriteUrl=(meta.spriteUrl if meta else None),
             width=(meta.width if meta else None),
@@ -319,8 +319,9 @@ def _extract_petdex_index(html: str) -> list[PetInfo]:
             columns=(meta.columns if meta else None),
             frames=(meta.frames if meta else None),
         )
-        items[slug] = item
-    return sorted(items.values(), key=lambda p: (p.assetKind != "sprite", p.displayName.lower()))
+    if not items:
+        raise ValueError("Petdex manifest contains no usable pets")
+    return sorted(items.values(), key=lambda p: p.displayName.lower())
 
 
 def refresh_index(force: bool = False) -> list[PetInfo]:
@@ -328,15 +329,25 @@ def refresh_index(force: bool = False) -> list[PetInfo]:
     if not force and INDEX_FILE.exists():
         try:
             data = json.loads(INDEX_FILE.read_text(encoding="utf-8"))
-            if time.time() - float(data.get("ts", 0)) < 24 * 3600:
+            if (
+                data.get("version") == INDEX_VERSION
+                and time.time() - float(data.get("ts", 0)) < 24 * 3600
+            ):
                 remote = [PetInfo(**x) for x in data.get("pets", [])]
                 return merge_with_local(remote)
         except Exception:
             pass
-    html = _fetch_text(PETDEX_URL)
-    remote = _extract_petdex_index(html)
+    raw_manifest = _fetch_text(PETDEX_MANIFEST_URL)
+    remote = _extract_petdex_manifest(raw_manifest)
     INDEX_FILE.write_text(
-        _json_response({"ts": time.time(), "source": PETDEX_URL, "pets": [p.to_dict() for p in remote]}),
+        _json_response(
+            {
+                "version": INDEX_VERSION,
+                "ts": time.time(),
+                "source": PETDEX_MANIFEST_URL,
+                "pets": [p.to_dict() for p in remote],
+            }
+        ),
         encoding="utf-8",
     )
     return merge_with_local(remote)
