@@ -35,8 +35,9 @@ When Hermes loads the plugin, it:
 
 When the Gateway emits `gateway:startup`, that hook ensures that:
 
-1. A Liveware app named `ClawPet` exists and is bound to the pet service
-2. The app is registered in ClawChat and the Liveware tunnel agent is running
+1. The current pet asset is cached locally, downloading it when missing
+2. A Liveware app named `ClawPet` exists and is bound to the pet service
+3. The app is registered in ClawChat and the Liveware tunnel agent is running
 
 Liveware agent startup and publication repair run in one background worker so
 Liveware or ClawChat failures do not block the Gateway. The worker starts only

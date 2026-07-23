@@ -1,6 +1,6 @@
 manifest_version: 1
 name: clawchat-pet
-version: "0.5.5"
+version: "0.5.6"
 description: "Hermes hooks + shared pet growth + selectable gameplay scenes."
 provides_hooks:
   - pre_llm_call

@@ -188,6 +188,9 @@ class PluginRegistrationTests(unittest.TestCase):
         with (
             patch.object(gateway_startup, "_STARTUP_THREAD", None),
             patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(
+                gateway_startup, "_ensure_current_pet_asset"
+            ) as ensure_pet,
             patch.object(gateway_startup, "_ensure_liveware_running") as ensure_agent,
             patch("clawchat_pet.gateway_startup.atexit.register"),
             patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),
@@ -205,9 +208,103 @@ class PluginRegistrationTests(unittest.TestCase):
             )
 
         self.assertTrue(scheduled)
+        ensure_pet.assert_called_once_with()
         self.assertEqual(2, ensure_agent.call_count)
         publication_type.assert_called_once_with(adapter_type.return_value)
         publication.ensure.assert_called_once_with()
+
+    def test_gateway_caches_current_pet_before_starting_liveware(self):
+        class ImmediateThread:
+            def __init__(self, *, target, name, daemon):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def is_alive(self):
+                return False
+
+        events = []
+        runtime = Mock()
+        runtime.ensure_current_pet_asset.side_effect = (
+            lambda: events.append("pet-ready")
+        )
+        publication = Mock()
+        publication.ensure.side_effect = lambda: (
+            events.append("publication"),
+            Mock(app_id="app-1", url="https://pet"),
+        )[1]
+
+        with (
+            patch.object(gateway_startup, "_STARTUP_THREAD", None),
+            patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(
+                gateway_startup,
+                "_ensure_liveware_running",
+                side_effect=lambda: events.append("liveware"),
+            ),
+            patch("clawchat_pet.gateway_startup.atexit.register"),
+            patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),
+            patch("clawchat_pet.server.get_runtime", return_value=runtime),
+            patch("clawchat_pet.publication.HermesLivewareAdapter"),
+            patch(
+                "clawchat_pet.publication.LivewarePublication",
+                return_value=publication,
+            ),
+        ):
+            scheduled = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
+
+        self.assertTrue(scheduled)
+        self.assertEqual(
+            ["pet-ready", "liveware", "publication", "liveware"],
+            events,
+        )
+
+    def test_missing_current_pet_prevents_liveware_publication(self):
+        class ImmediateThread:
+            def __init__(self, *, target, name, daemon):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def is_alive(self):
+                return False
+
+        publication = Mock()
+        with (
+            patch.object(gateway_startup, "_STARTUP_THREAD", None),
+            patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(
+                gateway_startup,
+                "_ensure_current_pet_asset",
+                side_effect=OSError("download failed"),
+            ),
+            patch.object(gateway_startup, "_ensure_liveware_running") as ensure_agent,
+            patch("clawchat_pet.gateway_startup.atexit.register"),
+            patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),
+            patch("clawchat_pet.publication.HermesLivewareAdapter"),
+            patch(
+                "clawchat_pet.publication.LivewarePublication",
+                return_value=publication,
+            ),
+            self.assertLogs("clawchat-pet", level="ERROR") as logs,
+        ):
+            scheduled = gateway_startup.handle_gateway_startup(
+                "gateway:startup",
+                {"platforms": ["clawchat"]},
+            )
+
+        self.assertTrue(scheduled)
+        ensure_agent.assert_not_called()
+        publication.ensure.assert_not_called()
+        self.assertTrue(any(
+            "current pet asset preparation failed" in entry
+            for entry in logs.output
+        ))
 
     def test_publication_failure_does_not_escape_gateway_startup_worker(self):
         class ImmediateThread:
@@ -225,6 +322,7 @@ class PluginRegistrationTests(unittest.TestCase):
         with (
             patch.object(gateway_startup, "_STARTUP_THREAD", None),
             patch.object(gateway_startup, "_LIVEWARE_ATEXIT_REGISTERED", False),
+            patch.object(gateway_startup, "_ensure_current_pet_asset"),
             patch.object(gateway_startup, "_ensure_liveware_running") as ensure_agent,
             patch("clawchat_pet.gateway_startup.atexit.register"),
             patch("clawchat_pet.gateway_startup.threading.Thread", ImmediateThread),

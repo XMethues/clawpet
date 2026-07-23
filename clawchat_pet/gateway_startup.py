@@ -71,8 +71,20 @@ def _ensure_liveware_running() -> bool:
     return liveware.ensure_running()
 
 
+def _ensure_current_pet_asset() -> Path:
+    from .server import get_runtime
+
+    return get_runtime().ensure_current_pet_asset()
+
+
 def _run_liveware_startup() -> None:
     """Repair the complete Liveware data plane without blocking Gateway."""
+    try:
+        _ensure_current_pet_asset()
+    except Exception:
+        _LOGGER.exception("ClawPet current pet asset preparation failed")
+        return
+
     try:
         _ensure_liveware_running()
     except Exception:

@@ -169,7 +169,7 @@ class ReusableTCPServer(socketserver.ThreadingTCPServer):
 
 def _warm_runtime(runtime: ClawchatPetRuntime) -> None:
     try:
-        runtime.pet_asset("yinyue-2")
+        runtime.ensure_current_pet_asset()
     except Exception as exc:
         print(f"clawchat-pet pet warm failed: {exc}", file=sys.stderr, flush=True)
 

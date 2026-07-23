@@ -31,6 +31,24 @@ PETS = [
 
 
 class RuntimeInterfaceTests(unittest.TestCase):
+    def test_gateway_asset_warm_uses_the_current_saved_pet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            yinyue_sprite = directory / "yinyue.webp"
+            boba_sprite = directory / "boba.webp"
+            yinyue_sprite.write_bytes(b"yinyue")
+            boba_sprite.write_bytes(b"boba")
+            pets = [
+                {**PETS[0], "spritePath": str(yinyue_sprite)},
+                {**PETS[1], "spritePath": str(boba_sprite)},
+            ]
+            runtime = ClawchatPetRuntime(directory, pet_catalog=pets)
+            runtime.command({"type": "select_pet", "pet_id": "boba"})
+
+            warmed = runtime.ensure_current_pet_asset()
+
+        self.assertEqual(boba_sprite, warmed)
+
     def test_new_runtime_owns_one_save(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)

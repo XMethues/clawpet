@@ -141,6 +141,13 @@ class ClawchatPetRuntime:
         with self._lock:
             return self._pets.sprite_path(slug)
 
+    def ensure_current_pet_asset(self) -> Path:
+        """Return the current pet asset, downloading it when not cached."""
+        with self._lock:
+            save = self._read()
+            pet = self._current_pet(save)
+            return self._pets.sprite_path(str(pet["slug"]))
+
     def background_asset(self, filename: str) -> Path:
         """Resolve one user-owned background without exposing arbitrary files."""
         if not filename or Path(filename).name != filename:
